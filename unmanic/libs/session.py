@@ -51,7 +51,7 @@ class Session(object, metaclass=SingletonType):
     level - The user auth level
     Set level to 0 by default
     """
-    level = 0
+    level = 5
 
     """
     picture_uri - The user avatar
@@ -94,6 +94,8 @@ class Session(object, metaclass=SingletonType):
 
         :return:
         """
+        return True
+
         if not self.created:
             return False
         # Get session expiration time

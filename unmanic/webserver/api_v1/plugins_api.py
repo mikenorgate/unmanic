@@ -264,7 +264,7 @@ class ApiPluginsHandler(BaseApiHandler):
         plugin_type = self.get_argument('plugin_type')
 
         plugin_handler = PluginsHandler()
-        plugin_modules = plugin_handler.get_plugin_modules_by_type(plugin_type)
+        plugin_modules = plugin_handler.get_enabled_plugin_modules_by_type(plugin_type)
 
         # Only return the data that we need
         return_plugin_flow = []
@@ -339,6 +339,8 @@ class ApiPluginsHandler(BaseApiHandler):
                     "input_type":     None,
                     "label":          None,
                     "select_options": [],
+                    "range_options":  {},
+                    "display":        "visible",
                 }
 
                 plugin_setting_meta = plugin_settings_meta.get(key, {})
@@ -356,10 +358,14 @@ class ApiPluginsHandler(BaseApiHandler):
                     "textarea",
                     "select",
                     "checkbox",
+                    "range",
                     "browse_directory",
                 ]
                 if form_input['input_type'] not in supported_input_types:
                     form_input['input_type'] = "text"
+
+                # Set input display options
+                form_input['display'] = plugin_setting_meta.get('display', 'visible')
 
                 # Set input label text
                 form_input['label'] = plugin_setting_meta.get('label', None)
@@ -372,6 +378,17 @@ class ApiPluginsHandler(BaseApiHandler):
                     if not form_input['select_options']:
                         # No options are given. Revert back to text input
                         form_input['input_type'] = 'text'
+
+                # Set options if form input is range
+                if form_input['input_type'] == 'range':
+                    range_options = plugin_setting_meta.get('range_options')
+                    if not range_options:
+                        # No options are given. Revert back to text input
+                        form_input['input_type'] = 'text'
+                    else:
+                        form_input['range_options'] = range_options
+                        if not range_options.get('suffix'):
+                            form_input['range_options']['suffix'] = ''
 
                 settings.append(form_input)
         return settings
@@ -410,7 +427,7 @@ class ApiPluginsHandler(BaseApiHandler):
             # Try to fetch it from the repository
             plugin_list = plugins.get_installable_plugins_list()
             for plugin in plugin_list:
-                if plugin.get('id') == plugin_id:
+                if plugin.get('plugin_id') == plugin_id:
                     # Create changelog text from remote changelog text file
                     plugin['changelog'] = plugins.read_remote_changelog_file(plugin.get('changelog_url'))
                     # Create list as the 'plugin_results' var above will also have returned a list if any results were found.
@@ -436,7 +453,8 @@ class ApiPluginsHandler(BaseApiHandler):
             if plugin_installed:
                 plugin_data['settings'] = self.__get_plugin_settings(plugin_result.get('plugin_id'))
                 plugin_data['changelog'] = "".join(self.__get_plugin_changelog(plugin_result.get('plugin_id')))
-                plugin_data['description'] += "\n" + "".join(self.__get_plugin_long_description(plugin_result.get('plugin_id')))
+                plugin_data['description'] += "\n" + "".join(
+                    self.__get_plugin_long_description(plugin_result.get('plugin_id')))
             break
 
         return plugin_data
@@ -493,7 +511,7 @@ class ApiPluginsHandler(BaseApiHandler):
             # If the save function was successful
             if saved_all_settings:
                 # Update settings in plugin data that will be returned
-                plugin_data['settings'] = settings_to_save
+                plugin_data['settings'] = self.__get_plugin_settings(plugin_id)
                 result = True
 
         self.write(json.dumps({"success": result, "plugin_info": plugin_data}))

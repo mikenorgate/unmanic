@@ -45,9 +45,9 @@ def prepare_filtered_completed_tasks(params):
     """
     start = params.get('start', 0)
     length = params.get('length', 0)
+
     search_value = params.get('search_value', '')
 
-    # Force sort order always by ID desc
     order = params.get('order', {
         "column": 'finish_time',
         "dir":    'desc',
@@ -57,6 +57,10 @@ def prepare_filtered_completed_tasks(params):
     history_logging = history.History()
     # Get total count
     records_total_count = history_logging.get_total_historic_task_list_count()
+    # Get total success count
+    records_total_success_count = history_logging.get_historic_task_list_filtered_and_sorted(task_success=True).count()
+    # Get total failed count
+    records_total_failed_count = history_logging.get_historic_task_list_filtered_and_sorted(task_success=False).count()
     # Get quantity after filters (without pagination)
     records_filtered_count = history_logging.get_historic_task_list_filtered_and_sorted(order=order, start=0, length=0,
                                                                                         search_value=search_value).count()
@@ -68,8 +72,8 @@ def prepare_filtered_completed_tasks(params):
     return_data = {
         "recordsTotal":    records_total_count,
         "recordsFiltered": records_filtered_count,
-        "successCount":    records_filtered_count,
-        "failedCount":     records_filtered_count,
+        "successCount":    records_total_success_count,
+        "failedCount":     records_total_failed_count,
         "results":         []
     }
 
@@ -83,12 +87,6 @@ def prepare_filtered_completed_tasks(params):
             'finish_time':  task['finish_time'],
         }
         return_data["results"].append(item)
-
-        # Increment counters
-        if task['task_success']:
-            return_data["successCount"] += 1
-        else:
-            return_data["failedCount"] += 1
 
     # Return results
     return return_data
@@ -106,12 +104,11 @@ def remove_completed_tasks(completed_task_ids):
     return task_handler.delete_historic_tasks_recursively(id_list=completed_task_ids)
 
 
-def add_historic_tasks_to_pending_tasks_list(historic_task_ids, config):
+def add_historic_tasks_to_pending_tasks_list(historic_task_ids):
     """
     Adds a list of historical tasks to the pending tasks list.
 
     :param historic_task_ids:
-    :param config:
     :return:
     """
     errors = {}
@@ -132,13 +129,58 @@ def add_historic_tasks_to_pending_tasks_list(historic_task_ids, config):
         # Create a new task
         new_task = task.Task()
 
-        # Run a probe on the file for current data
-        source_data = common.fetch_file_data_by_path(abspath)
-
-        if not new_task.create_task_by_absolute_path(abspath, config, source_data):
+        if not new_task.create_task_by_absolute_path(abspath):
             # If file exists in task queue already this will return false.
             # Do not carry on.
             errors[record.get("id")] = "File already in task queue - '{}'".format(abspath)
 
         continue
     return errors
+
+
+def read_command_log_for_task(task_id):
+    data = {
+        'command_log':       '',
+        'command_log_lines': [],
+    }
+    task_handler = history.History()
+    task_data = task_handler.get_historic_task_data_dictionary(task_id=task_id)
+    if not task_data:
+        return data
+
+    for command_log in task_data.get('completedtaskscommandlogs_set', []):
+        data['command_log'] += command_log['dump']
+        data['command_log_lines'] += format_ffmpeg_log_text(command_log['dump'].split("\n"))
+
+    return data
+
+
+def format_ffmpeg_log_text(log_lines):
+    return_list = []
+    pre_text = False
+    headers = ['RUNNER:', 'COMMAND:', 'LOG:']
+    for i, line in enumerate(log_lines):
+        line_text = line
+
+        # Add PRE to lines
+        if line_text and pre_text and line_text.rstrip() not in headers:
+            line_text = '<pre>{}</pre>'.format(line_text)
+
+        # Add bold to headers
+        line_text = line_text if line_text.rstrip() not in headers else '<b>{}</b>'.format(line_text)
+
+        # Replace leading whitespace
+        stripped = line.lstrip()
+        line_text = "&nbsp;" * (len(line) - len(stripped)) + line_text
+
+        # If log section is COMMAND:
+        if 'RUNNER:' in line_text:
+            # prepend a horizontal rule
+            return_list.append("<hr>")
+            pre_text = False
+        elif 'COMMAND:' in line_text:
+            pre_text = True
+        elif 'LOG:' in line_text:
+            pre_text = False
+        return_list.append(line_text)
+    return return_list

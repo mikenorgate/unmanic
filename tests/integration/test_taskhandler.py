@@ -75,14 +75,15 @@ class TestClass(object):
             "FILE":           ':memory:',
             "MIGRATIONS_DIR": os.path.join(app_dir, 'migrations'),
         }
-        self.db_connection = unmodels.Database.select_database(database_settings)
+        from unmanic.libs.unmodels.lib import Database
+        self.db_connection = Database.select_database(database_settings)
 
         # Create required tables
         self.db_connection.create_tables([Settings, Tasks])
 
         # import config
         from unmanic import config
-        self.settings = config.CONFIG(config_path=config_path, db_connection=self.db_connection)
+        self.settings = config.Config(config_path=config_path)
         self.settings.set_config_item('debugging', True, save_settings=False)
 
     def teardown_class(self):

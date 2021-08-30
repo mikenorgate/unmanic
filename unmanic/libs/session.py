@@ -35,7 +35,7 @@ import requests
 from unmanic import config
 from unmanic.libs import common, unlogger
 from unmanic.libs.singleton import SingletonType
-from unmanic.libs.unmodels import db, Installation
+from unmanic.libs.unmodels import Installation
 
 
 class Session(object, metaclass=SingletonType):
@@ -52,6 +52,11 @@ class Session(object, metaclass=SingletonType):
     Set level to 0 by default
     """
     level = 5
+
+    """
+    non supporter plugin count
+    """
+    plugin_count = 5
 
     """
     picture_uri - The user avatar
@@ -81,6 +86,7 @@ class Session(object, metaclass=SingletonType):
     def __init__(self, *args, **kwargs):
         unmanic_logging = unlogger.UnmanicLogger.__call__()
         self.logger = unmanic_logging.get_logger(__class__.__name__)
+        self.timeout = 5
 
     def _log(self, message, message2='', level="info"):
         message = common.format_message(message, message2)
@@ -103,7 +109,6 @@ class Session(object, metaclass=SingletonType):
         time_when_session_expires = self.created + 18000
         # Check that the time create is less than 5 hours old
         if time_now < time_when_session_expires:
-            self._log("Session valid ", level="debug")
             return True
         self._log("Session no longer valid ", level="debug")
         return False
@@ -117,7 +122,7 @@ class Session(object, metaclass=SingletonType):
         self.created = time.time()
         from datetime import datetime
         created = datetime.fromtimestamp(self.created)
-        self._log("Updated session at ", created, level="debug")
+        self._log("Updated session at ", str(created), level="debug")
 
     def get_installation_uuid(self):
         """
@@ -170,7 +175,7 @@ class Session(object, metaclass=SingletonType):
         :return:
         """
         u = self.set_full_api_url(api_version, api_path)
-        r = requests.get(u)
+        r = requests.get(u, timeout=self.timeout)
         return r.json()
 
     def api_post(self, api_version, api_path, data):
@@ -183,26 +188,27 @@ class Session(object, metaclass=SingletonType):
         :return:
         """
         u = self.set_full_api_url(api_version, api_path)
-        r = requests.post(u, json=data)
+        r = requests.post(u, json=data, timeout=self.timeout)
         return r.json()
 
-    def register_unmanic(self, uuid, force=False):
+    def register_unmanic(self, force=False):
         """
         Register Unmanic with site.
         This sends information about the system that Unmanic is running on.
         It also sends a unique ID.
 
-        Based on the return information, this will set the session level
+        Based on the return information, this will set the session level.
 
-        Return success status
+        Return success status.
 
+        :param force:
         :return:
         """
         # First check if the current session is still valid
         if not force and self.__check_session_valid():
             return True
 
-        settings = config.CONFIG()
+        settings = config.Config()
         try:
             # Build post data
             from unmanic.libs.system import System
@@ -212,7 +218,7 @@ class Session(object, metaclass=SingletonType):
             if platform_info:
                 platform_info = " * ".join(platform_info)
             post_data = {
-                "uuid":           uuid,
+                "uuid":           self.get_installation_uuid(),
                 "version":        settings.read_version(),
                 "python_version": system_info.get("python", ''),
                 "system":         {

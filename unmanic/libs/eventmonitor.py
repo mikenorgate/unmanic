@@ -34,6 +34,9 @@ import threading
 import time
 from pathlib import Path
 
+from unmanic import config
+from unmanic.libs.plugins import PluginsHandler
+
 try:
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
@@ -55,10 +58,9 @@ from unmanic.libs.filetest import FileTest
 
 
 class EventHandler(FileSystemEventHandler):
-    def __init__(self, data_queues, settings):
+    def __init__(self, data_queues):
         self.name = "EventProcessor"
-        self.settings = settings
-        self.inotifytasks = data_queues["inotifytasks"]
+        self.data_queues = data_queues
         self.logger = None
         self.abort_flag = threading.Event()
         self.abort_flag.clear()
@@ -71,7 +73,7 @@ class EventHandler(FileSystemEventHandler):
         getattr(self.logger, level)(message)
 
     def __add_path_to_queue(self, pathname):
-        self.inotifytasks.put(pathname)
+        self.data_queues.get('inotifytasks').put(pathname)
 
     def __handle_event(self, event):
         # Ensure event was not for a directory
@@ -84,7 +86,7 @@ class EventHandler(FileSystemEventHandler):
 
         # Test file to be added to task list. Add it if required
         try:
-            file_test = FileTest(self.settings, pathname)
+            file_test = FileTest(pathname)
             result, issues = file_test.should_file_be_added_to_task_list()
             # Log any error messages
             for issue in issues:
@@ -132,14 +134,12 @@ class EventMonitorManager(threading.Thread):
 
     """
 
-    def __init__(self, data_queues, settings):
+    def __init__(self, data_queues):
         super(EventMonitorManager, self).__init__(name='EventMonitorManager')
         self.name = "EventMonitorManager"
-        self.settings = settings
         self.data_queues = data_queues
-
-        self.logger = data_queues["logging"].get_logger(self.name)
-        self.inotifytasks = data_queues["inotifytasks"]
+        self.settings = config.Config()
+        self.logger = None
 
         self.abort_flag = threading.Event()
         self.abort_flag.clear()
@@ -147,6 +147,9 @@ class EventMonitorManager(threading.Thread):
         self.event_observer_thread = None
 
     def _log(self, message, message2='', level="info"):
+        if not self.logger:
+            unmanic_logging = unlogger.UnmanicLogger.__call__()
+            self.logger = unmanic_logging.get_logger(self.name)
         message = common.format_message(message, message2)
         getattr(self.logger, level)(message)
 
@@ -158,6 +161,12 @@ class EventMonitorManager(threading.Thread):
         # Otherwise close this thread now.
         self._log("Starting EventMonitorManager loop")
         while not self.abort_flag.is_set():
+
+            # Ensure all enabled plugins are compatible before starting the event monitor
+            if not self.all_plugins_are_compatible():
+                time.sleep(2)
+                continue
+
             # Check settings to ensure the event monitor should be enabled...
             if self.settings.get_enable_inotify():
                 # If enabled, ensure it is running and start it if it is not
@@ -173,6 +182,16 @@ class EventMonitorManager(threading.Thread):
         self.stop_event_processor()
         self._log("Leaving EventMonitorManager loop...")
 
+    def all_plugins_are_compatible(self):
+        """Ensure all plugins are compatible before running"""
+        valid = True
+        plugin_handler = PluginsHandler()
+        if plugin_handler.get_incompatible_enabled_plugins(self.data_queues.get('frontend_messages')):
+            valid = False
+        if not plugin_handler.within_enabled_plugin_limits(self.data_queues.get('frontend_messages')):
+            valid = False
+        return valid
+
     def start_event_processor(self):
         """
         Start the EventProcessor thread if it is not already running.
@@ -185,7 +204,7 @@ class EventMonitorManager(threading.Thread):
                 time.sleep(.1)
                 return
             self._log("EventMonitorManager spawning EventProcessor thread...")
-            event_handler = EventHandler(self.data_queues, self.settings)
+            event_handler = EventHandler(self.data_queues)
 
             self.event_observer_thread = Observer()
             self.event_observer_thread.schedule(event_handler, self.settings.get_library_path(), recursive=True)

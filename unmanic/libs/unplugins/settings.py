@@ -33,6 +33,7 @@ import json
 import os
 import sys
 
+from unmanic import config
 from unmanic.libs.singleton import SingletonType
 
 
@@ -58,8 +59,18 @@ class PluginSettings(object, metaclass=SingletonType):
     settings_configured = None
 
     def __get_plugin_settings_file(self):
-        plugin_directory = os.path.dirname(os.path.abspath(sys.modules[self.__class__.__module__].__file__))
-        return os.path.join(plugin_directory, 'settings.json')
+        plugin_directory = self.get_plugin_directory()
+        profile_directory = self.get_profile_directory()
+        # Temp code to migrate settings to userdata
+        # TODO: Remove after initial release
+        if not os.path.exists(os.path.join(profile_directory, 'settings.json')):
+            if os.path.exists(os.path.join(plugin_directory, 'settings.json')):
+                import shutil
+                shutil.move(
+                    os.path.join(plugin_directory, 'settings.json'),
+                    os.path.join(profile_directory, 'settings.json')
+                )
+        return os.path.join(profile_directory, 'settings.json')
 
     def __export_configured_settings(self):
         """
@@ -96,6 +107,32 @@ class PluginSettings(object, metaclass=SingletonType):
             if key in plugin_settings:
                 self.settings_configured[key] = plugin_settings.get(key)
 
+    def get_plugin_directory(self):
+        """
+        Return the absolute path to the Plugin's directory.
+        This is where the Plugin is currently installed.
+
+        :return:
+        """
+        return os.path.dirname(os.path.abspath(sys.modules[self.__class__.__module__].__file__))
+
+    def get_profile_directory(self):
+        """
+        Return the absolute path to the Plugin's profile directory.
+        This is where where Plugin settings are saved and where all mutable data for the
+        Plugin should be stored.
+
+        :return:
+        """
+        settings = config.Config()
+        userdata_path = settings.get_userdata_path()
+        plugin_directory = self.get_plugin_directory()
+        plugin_id = os.path.basename(plugin_directory)
+        profile_directory = os.path.join(userdata_path, plugin_id)
+        if not os.path.exists(profile_directory):
+            os.makedirs(profile_directory)
+        return profile_directory
+
     def get_setting(self, key=None):
         """
         Fetch a single configuration value, or, when passed "all" as the key argument,
@@ -105,7 +142,12 @@ class PluginSettings(object, metaclass=SingletonType):
         :return:
         """
         # First import settings
-        self.__import_configured_settings()
+        try:
+            self.__import_configured_settings()
+        except json.decoder.JSONDecodeError:
+            # If the import fails, then it will resort to defaults.
+            # That is fine. Better than breaking the rest of the process
+            pass
 
         if key is None:
             return self.settings_configured
@@ -123,14 +165,21 @@ class PluginSettings(object, metaclass=SingletonType):
         :return:
         """
         # First import settings
-        self.__import_configured_settings()
+        try:
+            self.__import_configured_settings()
+        except json.decoder.JSONDecodeError:
+            # If the import fails, then it will resort to defaults.
+            # That is fine. Better than breaking the rest of the process
+            pass
 
         # Ensure plugin has this setting
         if key not in self.settings:
-            return
+            return False
 
         # Set the configured value
         self.settings_configured[key] = value
 
         # Export the settings again
         self.__export_configured_settings()
+
+        return True

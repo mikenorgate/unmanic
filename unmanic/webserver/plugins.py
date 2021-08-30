@@ -5,7 +5,7 @@
     unmanic.plugins.py
 
     Written by:               Josh.5 <jsunnex@gmail.com>
-    Date:                     28 Feb 2021, (10:26 PM)
+    Date:                     25 Aug 2021, (3:49 PM)
 
     Copyright:
            Copyright (C) Josh Sunnex - All Rights Reserved
@@ -29,50 +29,84 @@
            OR OTHER DEALINGS IN THE SOFTWARE.
 
 """
+import os
+
 import tornado.web
+import tornado.log
 
-from unmanic import config
-from unmanic.libs import session
+from unmanic.webserver.helpers import plugins
 
 
-class PluginsUIRequestHandler(tornado.web.RequestHandler):
+def get_plugin_by_path(path):
+    # Get the plugin ID from the url
+    plugin_id = path.split('/')[3]
+    # Fetch all frontend plugins
+    results = plugins.get_enabled_plugin_data_panels()
+    # Check if their path matches
+    plugin_module = None
+    for result in results:
+        if plugin_id == result.get('plugin_id'):
+            plugin_module = result
+            break
+    return plugin_module
+
+
+class DataPanelRequestHandler(tornado.web.RequestHandler):
     name = None
-    config = None
-    session = None
 
-    data_queues = None
-    data = None
-
-    def initialize(self, data_queues):
-        self.name = 'plugins'
-        self.config = config.CONFIG()
-        self.session = session.Session()
-
-        self.data_queues = data_queues
-        self.data = {
-            'plugin_types': [
-                {
-                    'id':          'library_management_file_test',
-                    'name':        'Library Management - File test',
-                    'plugin_type': 'library_management.file_test',
-                },
-                {
-                    'id':          'worker_process',
-                    'name':        'Worker - Processing file',
-                    'plugin_type': 'worker.process_item',
-                },
-                {
-                    'id':          'postprocessor_file_movement',
-                    'name':        'Post-processor - File movements',
-                    'plugin_type': 'postprocessor.file_move',
-                },
-                {
-                    'id':          'postprocessor_task_results',
-                    'name':        'Post-processor - Marking task success/failure',
-                    'plugin_type': 'postprocessor.task_result',
-                },
-            ]
-        }
+    def initialize(self):
+        self.name = 'DataPanel'
 
     def get(self, path):
-        self.render("plugins/plugins.html", config=self.config, data=self.data, session=self.session)
+        self.handle_panel_request()
+
+    def handle_panel_request(self):
+        # Get the remainder of the path after the plugin ID. This will be passed as path
+        path = list(filter(None, self.request.path.split('/')[4:]))
+
+        # Generate default data
+        data = {
+            'content_type': 'text/html',
+            'content':      "<!doctype html>"
+                            "<html>"
+                            "<head></head>"
+                            "<body></body>"
+                            "</html>",
+            'path':         "/" + "/".join(path),
+            'uri':          self.request.uri,
+            'query':        self.request.query,
+            'arguments':    self.request.arguments
+        }
+        plugin_module = get_plugin_by_path(self.request.path)
+        if not plugin_module:
+            self.set_status(404)
+            self.write('404 Not Found')
+            return
+
+        # Run plugin and fetch return data
+        plugin_runner = plugin_module.get("runner")
+        try:
+            plugin_runner(data)
+        except Exception:
+            tornado.log.app_log.exception(
+                "Exception while carrying out plugin runner on postprocessor task result '{}'".format(
+                    plugin_module.get('plugin_id')))
+
+        self.render_data(data)
+        return
+
+    def render_data(self, data):
+        self.set_header("Content-Type", data.get('content_type', 'text/html'))
+        self.write(data.get('content'))
+
+
+class PluginStaticFileHandler(tornado.web.StaticFileHandler):
+    """
+    A static file handler which serves static content from a plugin '/static/' directory.
+    """
+
+    def initialize(self, path, default_filename=None):
+        plugin_module = get_plugin_by_path(self.request.path)
+        if plugin_module:
+            path = os.path.join(plugin_module.get('plugin_path'), 'static')
+        super(PluginStaticFileHandler, self).initialize(path, default_filename)

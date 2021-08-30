@@ -36,11 +36,14 @@ from unmanic import config
 from unmanic.libs import session
 from unmanic.libs.uiserver import UnmanicDataQueues
 from unmanic.webserver.api_v2.base_api_handler import BaseApiError, BaseApiHandler
+from unmanic.webserver.api_v2.schema.schemas import CompletedTasksLogRequestSchema, CompletedTasksLogSchema, \
+    CompletedTasksSchema, \
+    RequestHistoryTableDataSchema, \
+    RequestTableUpdateByIdList
 from unmanic.webserver.helpers import completed_tasks
 
 
 class ApiHistoryHandler(BaseApiHandler):
-    name = None
     session = None
     config = None
     params = None
@@ -56,42 +59,77 @@ class ApiHistoryHandler(BaseApiHandler):
             "path_pattern":      r"/history/tasks",
             "supported_methods": ["DELETE"],
             "call_method":       "delete_completed_tasks",
-            "parameters":        [
-                {
-                    "key":      "id_list",
-                    "required": True,
-                }
-            ],
         },
         {
             "path_pattern":      r"/history/reprocess",
             "supported_methods": ["POST"],
             "call_method":       "add_completed_tasks_to_pending_list",
-            "parameters":        [
-                {
-                    "key":      "id_list",
-                    "required": True,
-                }
-            ],
+        },
+        {
+            "path_pattern":      r"/history/task/log",
+            "supported_methods": ["POST"],
+            "call_method":       "get_completed_task_log",
         }
     ]
 
     def initialize(self, **kwargs):
-        self.name = 'session_api'
         self.session = session.Session()
         self.params = kwargs.get("params")
         udq = UnmanicDataQueues()
         self.unmanic_data_queues = udq.get_unmanic_data_queues()
-        self.config = config.CONFIG()
+        self.config = config.Config()
 
-    def get_completed_tasks(self, *args, **kwargs):
+    def get_completed_tasks(self):
+        """
+        History - list tasks
+        ---
+        description: Returns a list of completed tasks.
+        requestBody:
+            description: Returns a list of completed tasks.
+            required: True
+            content:
+                application/json:
+                    schema:
+                        RequestHistoryTableDataSchema
+        responses:
+            200:
+                description: 'Sample response: Returns a list of completed tasks.'
+                content:
+                    application/json:
+                        schema:
+                            CompletedTasksSchema
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
         try:
-            json_request = self.read_json_request()
+            json_request = self.read_json_request(RequestHistoryTableDataSchema())
 
             params = {
-                'start':        json_request.get('start', '0'),
-                'length':       json_request.get('length', '10'),
-                'search_value': json_request.get('search_value', ''),
+                'start':        json_request.get('start'),
+                'length':       json_request.get('length'),
+                'search_value': json_request.get('search_value'),
                 'order':        {
                     "column": json_request.get('order_by', 'finish_time'),
                     "dir":    json_request.get('order_direction', 'desc'),
@@ -99,13 +137,17 @@ class ApiHistoryHandler(BaseApiHandler):
             }
             task_list = completed_tasks.prepare_filtered_completed_tasks(params)
 
-            self.write_success({
-                "recordsTotal":    task_list.get('recordsTotal'),
-                "recordsFiltered": task_list.get('recordsFiltered'),
-                "successCount":    task_list.get('successCount'),
-                "failedCount":     task_list.get('failedCount'),
-                "results":         task_list.get('results'),
-            })
+            response = self.build_response(
+                CompletedTasksSchema(),
+                {
+                    "recordsTotal":    task_list.get('recordsTotal'),
+                    "recordsFiltered": task_list.get('recordsFiltered'),
+                    "successCount":    task_list.get('successCount'),
+                    "failedCount":     task_list.get('failedCount'),
+                    "results":         task_list.get('results'),
+                }
+            )
+            self.write_success(response)
             return
         except BaseApiError as bae:
             tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
@@ -114,9 +156,52 @@ class ApiHistoryHandler(BaseApiHandler):
             self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
             self.write_error()
 
-    def delete_completed_tasks(self, *args, **kwargs):
+    def delete_completed_tasks(self):
+        """
+        History - delete
+        ---
+        description: Delete a list of completed tasks.
+        requestBody:
+            description: Requested list of items to delete.
+            required: True
+            content:
+                application/json:
+                    schema:
+                        RequestTableUpdateByIdList
+        responses:
+            200:
+                description: 'Success: Deleted a list of completed tasks.'
+                content:
+                    application/json:
+                        schema:
+                            BaseSuccessSchema
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
         try:
-            json_request = self.read_json_request()
+            json_request = self.read_json_request(RequestTableUpdateByIdList())
 
             if not completed_tasks.remove_completed_tasks(json_request.get('id_list', [])):
                 self.set_status(self.STATUS_ERROR_INTERNAL, reason="Failed to delete the completed tasks by their IDs")
@@ -132,11 +217,54 @@ class ApiHistoryHandler(BaseApiHandler):
             self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
             self.write_error()
 
-    def add_completed_tasks_to_pending_list(self, *args, **kwargs):
+    def add_completed_tasks_to_pending_list(self):
+        """
+        History - reprocess
+        ---
+        description: Add a list of completed tasks back to the Pending Tasks queue.
+        requestBody:
+            description: Requested list of items to reprocess.
+            required: True
+            content:
+                application/json:
+                    schema:
+                        RequestTableUpdateByIdList
+        responses:
+            200:
+                description: 'Success: Requested list of items to reprocess.'
+                content:
+                    application/json:
+                        schema:
+                            BaseSuccessSchema
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
         try:
-            json_request = self.read_json_request()
+            json_request = self.read_json_request(RequestTableUpdateByIdList())
 
-            errors = completed_tasks.add_historic_tasks_to_pending_tasks_list(json_request.get('id_list', []), self.config)
+            errors = completed_tasks.add_historic_tasks_to_pending_tasks_list(json_request.get('id_list', []))
             if errors:
                 failed_ids = ''
                 for task_id in errors:
@@ -150,6 +278,71 @@ class ApiHistoryHandler(BaseApiHandler):
                 return
 
             self.write_success()
+            return
+        except BaseApiError as bae:
+            tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
+            return
+        except Exception as e:
+            self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
+            self.write_error()
+
+    def get_completed_task_log(self):
+        """
+        History - details
+        ---
+        description: Request the details of a completed task.
+        requestBody:
+            description: Requested the details of a completed task.
+            required: True
+            content:
+                application/json:
+                    schema:
+                        CompletedTasksLogRequestSchema
+        responses:
+            200:
+                description: 'Success: The details of a requested completed task.'
+                content:
+                    application/json:
+                        schema:
+                            CompletedTasksLogSchema
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
+        try:
+            json_request = self.read_json_request(CompletedTasksLogRequestSchema())
+
+            command_log = completed_tasks.read_command_log_for_task(json_request.get('task_id'))
+
+            response = self.build_response(
+                CompletedTasksLogSchema(),
+                {
+                    'command_log':       command_log.get('command_log', ''),
+                    'command_log_lines': command_log.get('command_log_lines', []),
+                }
+            )
+            self.write_success(response)
             return
         except BaseApiError as bae:
             tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))

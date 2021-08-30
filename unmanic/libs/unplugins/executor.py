@@ -46,14 +46,30 @@ class PluginExecutor(object):
         if not plugins_directory:
             plugins_directory = os.path.join(os.path.expanduser("~"), '.unmanic', 'plugins')
         self.plugins_directory = plugins_directory
-        # TODO: generate this list dynamically
+        # List plugin types in order that they are run
+        # Listing them in order helps for the frontend
         self.plugin_types = [
-            "library_management.file_test",
-            "postprocessor.file_move",
-            "postprocessor.task_result",
-            "worker.process_item",
+            {
+                'id':       'frontend.panel',
+                'has_flow': False,
+            },
+            {
+                'id':       'library_management.file_test',
+                'has_flow': True,
+            },
+            {
+                'id':       'worker.process_item',
+                'has_flow': True,
+            },
+            {
+                'id':       'postprocessor.file_move',
+                'has_flow': True,
+            },
+            {
+                'id':       'postprocessor.task_result',
+                'has_flow': True,
+            },
         ]
-        self.default_plugin_runner_name = "unmanic_default_stage"
         unmanic_logging = unlogger.UnmanicLogger.__call__()
         self.logger = unmanic_logging.get_logger(__class__.__name__)
 
@@ -97,6 +113,11 @@ class PluginExecutor(object):
         if os.path.exists(plugin_site_packages_dir) and plugin_site_packages_dir not in sys.path:
             sys.path.append(plugin_site_packages_dir)
 
+    @staticmethod
+    def __include_plugin_directory(path):
+        if os.path.exists(path) and path not in sys.path:
+            sys.path.append(path)
+
     def __load_plugin_module(self, plugin_id, path):
         """
         Loads and returns the python module from a given plugin path.
@@ -111,6 +132,9 @@ class PluginExecutor(object):
 
         # Get main module file
         plugin_module_path = os.path.join(path, 'plugin.py')
+
+        # Ensure the Unmanic plugins directory to sys path prior to loading it
+        self.__include_plugin_directory(self.plugins_directory)
 
         # Add site-packages directory to sys path prior to loading the module
         self.__include_plugin_site_packages(path)
@@ -132,10 +156,6 @@ class PluginExecutor(object):
             return None
 
     @staticmethod
-    def default_runner(data):
-        return data
-
-    @staticmethod
     def get_plugin_type_meta(plugin_type):
         return plugin_types.grab_module(plugin_type)
 
@@ -153,13 +173,13 @@ class PluginExecutor(object):
 
         for plugin_type in self.get_all_plugin_types():
             # Get the called runner function for the given plugin type
-            plugin_type_meta = self.get_plugin_type_meta(plugin_type)
+            plugin_type_meta = self.get_plugin_type_meta(plugin_type.get('id'))
             plugin_runner = plugin_type_meta.plugin_runner()
 
             # Check if this module contains the given plugin type runner function
             if hasattr(plugin_module, plugin_runner):
                 # If it does, add it to the plugin_modules list
-                return_plugin_types.append(plugin_type)
+                return_plugin_types.append(plugin_type.get('id'))
 
         return return_plugin_types
 
@@ -238,20 +258,6 @@ class PluginExecutor(object):
         # Filter out only plugins that have runners of this type
         plugin_data = self.build_plugin_data_from_plugin_list_filtered_by_plugin_type(enabled_plugins, plugin_type)
 
-        plugin_data.append(
-            {
-                "plugin_id":     self.default_plugin_runner_name,
-                "name":          "Default Unmanic Process",
-                "author":        "N/A",
-                "version":       "N/A",
-                "icon":          None,
-                "description":   "The default unmanic process as configured by the Unmanic settings",
-                "plugin_module": None,
-                "plugin_path":   None,
-                "runner":        self.default_runner,
-            }
-        )
-
         # Return runners
         return plugin_data
 
@@ -270,11 +276,15 @@ class PluginExecutor(object):
 
         if not hasattr(plugin_module, 'Settings'):
             # This plugin does not have a settings class
-            return {}
+            return {}, {}
 
-        settings = plugin_module.Settings()
+        try:
+            settings = plugin_module.Settings()
 
-        plugin_settings = settings.get_setting()
+            plugin_settings = settings.get_setting()
+        except Exception as e:
+            self._log(str(e), level='exception')
+            return {}, {}
 
         return plugin_settings, settings.form_settings
 
@@ -294,15 +304,19 @@ class PluginExecutor(object):
         # Load this plugin module
         plugin_module = self.__load_plugin_module(plugin_id, plugin_path)
 
-        plugin_settings = plugin_module.Settings()
+        try:
+            plugin_settings = plugin_module.Settings()
 
-        save_result = True
-        for key in settings:
-            value = settings.get(key)
-            if not plugin_settings.set_setting(key, value):
-                save_result = False
+            save_result = True
+            for key in settings:
+                value = settings.get(key)
+                if not plugin_settings.set_setting(key, value):
+                    save_result = False
 
-        return save_result
+            return save_result
+        except Exception as e:
+            self._log(str(e), level='exception')
+            return False
 
     def get_plugin_changelog(self, plugin_id):
         """
@@ -314,7 +328,7 @@ class PluginExecutor(object):
         changelog = []
         # Get the path for this plugin
         plugin_path = self.__get_plugin_directory(plugin_id)
-        plugin_changelog = os.path.join(plugin_path, 'changelog.txt')
+        plugin_changelog = os.path.join(plugin_path, 'changelog.md')
         if os.path.exists(plugin_changelog):
             with open(plugin_changelog, 'r') as f:
                 changelog = f.readlines()
@@ -331,7 +345,7 @@ class PluginExecutor(object):
         description = []
         # Get the path for this plugin
         plugin_path = self.__get_plugin_directory(plugin_id)
-        plugin_description = os.path.join(plugin_path, 'description.txt')
+        plugin_description = os.path.join(plugin_path, 'description.md')
         if os.path.exists(plugin_description):
             with open(plugin_description, 'r') as f:
                 description = f.readlines()
@@ -339,10 +353,6 @@ class PluginExecutor(object):
         return description
 
     def test_plugin_runner(self, plugin_id, plugin_type, test_data=None):
-        # Dont run a test on the default plugin runner
-        if plugin_id == self.default_plugin_runner_name:
-            return []
-
         try:
             # Get the path for this plugin
             plugin_path = self.__get_plugin_directory(plugin_id)
@@ -361,10 +371,6 @@ class PluginExecutor(object):
         return errors
 
     def test_plugin_settings(self, plugin_id):
-        # Don't run a test on the default plugin runner
-        if plugin_id == self.default_plugin_runner_name:
-            return []
-
         errors = []
 
         # Get the called runner function for the given plugin type

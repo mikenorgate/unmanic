@@ -33,9 +33,9 @@
 import os
 import socket
 import threading
-import queue
 import asyncio
 import logging
+from queue import Queue
 
 from tornado.httpserver import HTTPServer
 from tornado.ioloop import IOLoop
@@ -48,20 +48,120 @@ from unmanic import config
 from unmanic.libs import common
 from unmanic.libs.singleton import SingletonType
 
-templates_dir = os.path.abspath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'webserver', 'templates'))
-
+public_directory = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "webserver", "public"))
 tornado_settings = {
-    'template_loader': Loader(templates_dir),
-    'static_path':     os.path.join(os.path.dirname(__file__), "..", "webserver", "assets"),
-    'static_css':      os.path.join(os.path.dirname(__file__), "..", "webserver", "templates", "spa", "css"),
-    'static_fonts':    os.path.join(os.path.dirname(__file__), "..", "webserver", "templates", "spa", "fonts"),
-    'static_icons':    os.path.join(os.path.dirname(__file__), "..", "webserver", "templates", "spa", "icons"),
-    'static_img':      os.path.join(os.path.dirname(__file__), "..", "webserver", "templates", "spa", "img"),
-    'static_js':       os.path.join(os.path.dirname(__file__), "..", "webserver", "templates", "spa", "js"),
+    'template_loader': Loader(public_directory),
+    'static_css':      os.path.join(public_directory, "css"),
+    'static_fonts':    os.path.join(public_directory, "fonts"),
+    'static_icons':    os.path.join(public_directory, "icons"),
+    'static_img':      os.path.join(public_directory, "img"),
+    'static_js':       os.path.join(public_directory, "js"),
     'debug':           True,
     'autoreload':      False,
 }
+
+
+class FrontendPushMessages(Queue, metaclass=SingletonType):
+    """
+    Handles messages passed to the frontend.
+
+    Messages are sent as objects. These objects require the following fields:
+        - 'id'          : A unique ID of the message. Prevents messages duplication
+        - 'type'        : The type of message - 'error', 'warning', 'success', or 'info'
+        - 'code'        : A code to represent an I18n string for the frontend to display
+        - 'message'     : Additional message string that can be appended to the I18n string displayed on the frontend.
+        - 'timeout'     : The timeout for this message. If set to 0, then the message will persist until manually dismissed.
+
+    """
+
+    def _init(self, maxsize):
+        self.all_items = set()
+        Queue._init(self, maxsize)
+
+    def put(self, item):
+        # Ensure received item is valid
+        self.__validate_item(item)
+        # If it is not already in message list, add it to the list and the queue
+        if item.get('id') not in self.all_items:
+            self.all_items.add(item.get('id'))
+            self.add_to_queue(item)
+
+    def add_to_queue(self, item, block=True, timeout=None):
+        Queue.put(self, item, block, timeout)
+
+    @staticmethod
+    def __validate_item(item):
+        # Ensure all required keys are present
+        for key in ['id', 'type', 'code', 'message', 'timeout']:
+            if key not in item:
+                raise Exception("Frontend message item incorrectly formatted. Missing key: '{}'".format(key))
+
+        # Ensure the given type is valid
+        if item.get('type') not in ['error', 'warning', 'success', 'info', 'status']:
+            raise Exception(
+                "Frontend message item's code must be in ['error', 'warning', 'success', 'info', 'status']. Received '{}'".format(
+                    item.get('type')
+                )
+            )
+        return True
+
+    def get_all_items(self):
+        items = []
+        while not self.empty():
+            items.append(self.get())
+        return items
+
+    def requeue_items(self, items):
+        for item in items:
+            self.add_to_queue(item)
+
+    def remove_item(self, item_id):
+        # Get all items out of queue
+        current_items = self.get_all_items()
+        # Create list of items that will be queued again
+        requeue_items = []
+        for current_item in current_items:
+            if current_item.get('id') != item_id:
+                requeue_items.append(current_item)
+        # Remove the requested item ID from the all_items set
+        lock = threading.RLock()
+        lock.acquire()
+        if item_id in self.all_items:
+            self.all_items.remove(item_id)
+        lock.release()
+        # Add all requeue_items items back into the queue
+        self.requeue_items(requeue_items)
+
+    def read_all_items(self):
+        # Get all items out of queue
+        current_items = self.get_all_items()
+        # Add all requeue_items items back into the queue
+        self.requeue_items(current_items)
+        # Return items list
+        return current_items
+
+    def update(self, item):
+        # Ensure received item is valid
+        self.__validate_item(item)
+        # If it is not already in message list, add it to the list and the queue
+        if item.get('id') not in self.all_items:
+            self.all_items.add(item.get('id'))
+            self.add_to_queue(item)
+        else:
+            # Get all items out of queue
+            current_items = self.get_all_items()
+            # Create list of items that will be queued again
+            # This will not include the item requested for update
+            lock = threading.RLock()
+            lock.acquire()
+            requeue_items = []
+            for current_item in current_items:
+                if current_item.get('id') != item.get('id'):
+                    requeue_items.append(current_item)
+                    continue
+                requeue_items.append(item)
+            # Add all requeue_items items back into the queue
+            self.requeue_items(requeue_items)
 
 
 class UnmanicDataQueues(object, metaclass=SingletonType):
@@ -99,7 +199,7 @@ class UIServer(threading.Thread):
 
     def __init__(self, unmanic_data_queues, foreman, developer):
         super(UIServer, self).__init__(name='UIServer')
-        self.config = config.CONFIG()
+        self.config = config.Config()
 
         self.developer = developer
         self.data_queues = unmanic_data_queues
@@ -193,9 +293,10 @@ class UIServer(threading.Thread):
         )
 
         try:
-            self.server.listen(int(self.config.UI_PORT))
+            self.server.listen(int(self.config.get_ui_port()))
         except socket.error as e:
-            self._log("Exception when setting WebUI port {}:".format(self.config.UI_PORT), message2=str(e), level="warning")
+            self._log("Exception when setting WebUI port {}:".format(self.config.get_ui_port()), message2=str(e),
+                      level="warning")
             raise SystemExit
 
         self.io_loop = IOLoop().current()
@@ -205,82 +306,81 @@ class UIServer(threading.Thread):
         self._log("Leaving UIServer loop...")
 
     def make_web_app(self):
-        from unmanic.webserver.api_request_router import APIRequestRouter
-        from unmanic.webserver.history import HistoryUIRequestHandler
-        from unmanic.webserver.main import MainUIRequestHandler, DashboardWebSocket
-        from unmanic.webserver.plugins import PluginsUIRequestHandler
-        from unmanic.webserver.settings import SettingsUIRequestHandler
-        from unmanic.webserver.helpers.element_filebrowser import ElementFileBrowserUIRequestHandler
-        from unmanic.webserver.websocket import UnmanicWebsocketHandler
-
         # Start with web application routes
+        from unmanic.webserver.websocket import UnmanicWebsocketHandler
         app = Application([
-            (r"/assets/(.*)", StaticFileHandler, dict(
-                path=tornado_settings['static_path']
-            )),
-            (r"/dashws", DashboardWebSocket, dict(
-                data_queues=self.data_queues,
-                foreman=self.foreman,
-            )),
-            (r"/history/(.*)", HistoryUIRequestHandler, dict(
-                data_queues=self.data_queues,
-            )),
-            (r"/plugins/(.*)", PluginsUIRequestHandler, dict(
-                data_queues=self.data_queues,
-            )),
-            (r"/settings/(.*)", SettingsUIRequestHandler, dict(
-                data_queues=self.data_queues,
-            )),
-            (r"/filebrowser/(.*)", ElementFileBrowserUIRequestHandler, dict(
-                data_queues=self.data_queues,
-            )),
-
-            (r"/websocket", UnmanicWebsocketHandler),
-            (r"/css/(.*)", StaticFileHandler, dict(
-                path=tornado_settings['static_css']
-            )),
-            (r"/fonts/(.*)", StaticFileHandler, dict(
-                path=tornado_settings['static_fonts']
-            )),
-            (r"/icons/(.*)", StaticFileHandler, dict(
-                path=tornado_settings['static_icons']
-            )),
-            (r"/img/(.*)", StaticFileHandler, dict(
-                path=tornado_settings['static_img']
-            )),
-            (r"/js/(.*)", StaticFileHandler, dict(
-                path=tornado_settings['static_js']
-            )),
-            (r"/unmanic-dashboard/(.*)", MainUIRequestHandler, dict(
-                data_queues=self.data_queues,
-                foreman=self.foreman,
-            )),
-            (r"/trigger/(.*)", MainUIRequestHandler, dict(
-                data_queues=self.data_queues,
-                foreman=self.foreman,
-            )),
+            (r"/unmanic/websocket", UnmanicWebsocketHandler),
             (r"/(.*)", RedirectHandler, dict(
-                url="/unmanic-dashboard/"
+                url="/unmanic/ui/dashboard/"
             )),
         ], **tornado_settings)
 
         # Add API routes
-        app.add_handlers(r'.*', [(
-            PathMatches(r"/api/.*"),
-            APIRequestRouter(app)
-        ), ])
+        from unmanic.webserver.api_request_router import APIRequestRouter
+        app.add_handlers(r'.*', [
+            (
+                PathMatches(r"/unmanic/api/.*"),
+                APIRequestRouter(app)
+            ),
+        ])
+
+        # Add frontend routes
+        from unmanic.webserver.main import MainUIRequestHandler
+        app.add_handlers(r'.*', [
+            (r"/unmanic/css/(.*)", StaticFileHandler, dict(
+                path=tornado_settings['static_css']
+            )),
+            (r"/unmanic/fonts/(.*)", StaticFileHandler, dict(
+                path=tornado_settings['static_fonts']
+            )),
+            (r"/unmanic/icons/(.*)", StaticFileHandler, dict(
+                path=tornado_settings['static_icons']
+            )),
+            (r"/unmanic/img/(.*)", StaticFileHandler, dict(
+                path=tornado_settings['static_img']
+            )),
+            (r"/unmanic/js/(.*)", StaticFileHandler, dict(
+                path=tornado_settings['static_js']
+            )),
+            (
+                PathMatches(r"/unmanic/ui/(.*)"),
+                MainUIRequestHandler,
+            ),
+        ])
+
+        # Add widgets routes
+        from unmanic.webserver.plugins import DataPanelRequestHandler
+        from unmanic.webserver.plugins import PluginStaticFileHandler
+        app.add_handlers(r'.*', [
+            (
+                PathMatches(r"/unmanic/panel/[^/]+(/(?!static/|assets$).*)?$"),
+                DataPanelRequestHandler
+            ),
+            (r"/unmanic/panel/.*/static/(.*)", PluginStaticFileHandler, dict(
+                path=tornado_settings['static_img']
+            )),
+        ])
+
+        if self.developer:
+            self._log("API Docs - Updating...", level="debug")
+            try:
+                from unmanic.webserver.api_v2.schema.swagger import generate_swagger_file
+                errors = generate_swagger_file()
+                for error in errors:
+                    self._log(error, level="warn")
+                else:
+                    self._log("API Docs - Updated successfully", level="debug")
+            except Exception as e:
+                self._log("Failed to reload API schema", message2=str(e), level="error")
+
+        # Start the Swagger UI. Automatically generated swagger.json can also
+        # be served using a separate Swagger-service.
+        from swagger_ui import tornado_api_doc
+        tornado_api_doc(
+            app,
+            config_path=os.path.join(os.path.dirname(__file__), "..", "webserver", "docs", "api_schema_v2.json"),
+            url_prefix="/unmanic/swagger",
+            title="Unmanic application API"
+        )
 
         return app
-
-
-if __name__ == "__main__":
-    print("Starting UI Server")
-    data_queues = {
-        "scheduledtasks": queue.Queue(),
-        "inotifytasks":   queue.Queue()
-    }
-    settings = None
-    uiserver = UIServer(data_queues, settings)
-    uiserver.daemon = True
-    uiserver.start()
-    uiserver.join()

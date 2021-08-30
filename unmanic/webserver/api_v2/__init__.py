@@ -34,17 +34,29 @@ from __future__ import absolute_import
 import warnings
 
 from .docs_api import ApiDocsHandler
+from .filebrowser_api import ApiFilebrowserHandler
 from .history_api import ApiHistoryHandler
 from .pending_api import ApiPendingHandler
+from .plugins_api import ApiPluginsHandler
 from .session_api import ApiSessionHandler
+from .settings_api import ApiSettingsHandler
 from .version_api import ApiVersionHandler
+from .workers_api import ApiWorkersHandler
 
 __author__ = 'Josh.5 (jsunnex@gmail.com)'
 
 __all__ = (
     'ApiDocsHandler',
+    'ApiFilebrowserHandler',
     'ApiHistoryHandler',
     'ApiPendingHandler',
+    'ApiPluginsHandler',
     'ApiSessionHandler',
+    'ApiSettingsHandler',
     'ApiVersionHandler',
+    'ApiWorkersHandler'
 )
+
+
+def list_all_handlers():
+    return __all__

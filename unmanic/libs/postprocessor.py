@@ -35,13 +35,13 @@ import shutil
 import threading
 import time
 
-from unmanic.libs.fileinfo import FileInfo
-from unmanic.libs import common, history, ffmpeg, unffmpeg
+from unmanic import config
+from unmanic.libs import common, history
 from unmanic.libs.plugins import PluginsHandler
 
 """
 
-The post-processor handles all tasks carried out on completion of a workers ffmpeg task.
+The post-processor handles all tasks carried out on completion of a workers task.
 This may be on either success or failure of the task.
 
 The post-processor runs as a single thread, processing completed jobs one at a time.
@@ -64,10 +64,11 @@ class PostProcessor(threading.Thread):
 
     """
 
-    def __init__(self, data_queues, settings, task_queue):
+    def __init__(self, data_queues, task_queue):
         super(PostProcessor, self).__init__(name='PostProcessor')
         self.logger = data_queues["logging"].get_logger(self.name)
-        self.settings = settings
+        self.data_queues = data_queues
+        self.settings = config.Config()
         self.task_queue = task_queue
         self.abort_flag = threading.Event()
         self.current_task = None
@@ -78,33 +79,6 @@ class PostProcessor(threading.Thread):
         message = common.format_message(message, message2)
         getattr(self.logger, level)(message)
 
-    def setup_ffmpeg(self):
-        """
-        Configure ffmpeg object.
-
-        :return:
-        """
-        settings = {
-            'audio_codec':                          self.current_task.settings.audio_codec,
-            'audio_codec_cloning':                  self.current_task.settings.audio_codec_cloning,
-            'audio_stereo_stream_bitrate':          self.current_task.settings.audio_stereo_stream_bitrate,
-            'audio_stream_encoder':                 self.current_task.settings.audio_stream_encoder,
-            'cache_path':                           self.current_task.settings.cache_path,
-            'debugging':                            self.current_task.settings.debugging,
-            'enable_audio_encoding':                self.current_task.settings.enable_audio_encoding,
-            'enable_audio_stream_stereo_cloning':   self.current_task.settings.enable_audio_stream_stereo_cloning,
-            'enable_audio_stream_transcoding':      self.current_task.settings.enable_audio_stream_transcoding,
-            'enable_video_encoding':                self.current_task.settings.enable_video_encoding,
-            'out_container':                        self.current_task.settings.out_container,
-            'remove_subtitle_streams':              self.current_task.settings.remove_subtitle_streams,
-            'video_codec':                          self.current_task.settings.video_codec,
-            'video_stream_encoder':                 self.current_task.settings.video_stream_encoder,
-            'overwrite_additional_ffmpeg_options':  self.current_task.settings.overwrite_additional_ffmpeg_options,
-            'additional_ffmpeg_options':            self.current_task.settings.additional_ffmpeg_options,
-            'enable_hardware_accelerated_decoding': self.current_task.settings.enable_hardware_accelerated_decoding,
-        }
-        self.ffmpeg = ffmpeg.FFMPEGHandle(settings)
-
     def stop(self):
         self.abort_flag.set()
 
@@ -112,6 +86,10 @@ class PostProcessor(threading.Thread):
         self._log("Starting PostProcessor Monitor loop...")
         while not self.abort_flag.is_set():
             time.sleep(1)
+
+            if not self.all_plugins_are_compatible():
+                time.sleep(2)
+                continue
 
             while not self.abort_flag.is_set() and not self.task_queue.task_list_processed_is_empty():
                 time.sleep(.2)
@@ -121,16 +99,24 @@ class PostProcessor(threading.Thread):
                         self._log("Post-processing task - {}".format(self.current_task.get_source_abspath()))
                     except Exception as e:
                         self._log("Exception in fetching task absolute path", message2=str(e), level="exception")
-                    self.setup_ffmpeg()
                     # Post process the converted file (return it to original directory etc.)
                     self.post_process_file()
                     # Write source and destination data to historic log
                     self.write_history_log()
                     # Remove file from task queue
-                    # self.current_task.set_status('complete')
                     self.current_task.delete()
 
         self._log("Leaving PostProcessor Monitor loop...")
+
+    def all_plugins_are_compatible(self):
+        """Ensure all plugins are compatible before running"""
+        valid = True
+        plugin_handler = PluginsHandler()
+        if plugin_handler.get_incompatible_enabled_plugins(self.data_queues.get('frontend_messages')):
+            valid = False
+        if not plugin_handler.within_enabled_plugin_limits(self.data_queues.get('frontend_messages')):
+            valid = False
+        return valid
 
     def post_process_file(self):
         # Init plugins handler
@@ -148,11 +134,8 @@ class PostProcessor(threading.Thread):
         if self.current_task.task.success:
             # Run a postprocess file movement on the cache file for for each plugin that configures it
 
-            # Ensure finaly cache path file is correct format
-            self.current_task.task.success = self.validate_streams(self.current_task.task.cache_path)
-
             # Fetch all 'postprocessor.file_move' plugin modules
-            plugin_modules = plugin_handler.get_plugin_modules_by_type('postprocessor.file_move')
+            plugin_modules = plugin_handler.get_enabled_plugin_modules_by_type('postprocessor.file_move')
 
             # Check if the source file needs to be remove by default (only if it does not match the destination file)
             remove_source_file = False
@@ -160,7 +143,7 @@ class PostProcessor(threading.Thread):
                 remove_source_file = True
 
             # Set initial data (some fields will be overwritten further down)
-            initial_data = {
+            data = {
                 "source_data":        None,
                 'remove_source_file': remove_source_file,
                 'copy_file':          None,
@@ -170,18 +153,18 @@ class PostProcessor(threading.Thread):
 
             for plugin_module in plugin_modules:
                 # Always set source_data to the original file's source_data
-                initial_data["source_data"] = source_data
+                data["source_data"] = source_data
                 # Always set copy_file to True
-                initial_data["copy_file"] = True
+                data["copy_file"] = True
                 # Always set file in to cache path
-                initial_data["file_in"] = cache_path
+                data["file_in"] = cache_path
                 # Always set file out to destination data absolute path
-                initial_data["file_out"] = destination_data.get('abspath')
+                data["file_out"] = destination_data.get('abspath')
 
                 # Run plugin and fetch return data
                 plugin_runner = plugin_module.get("runner")
                 try:
-                    data = plugin_runner(initial_data)
+                    plugin_runner(data)
                 except Exception as e:
                     self._log("Exception while carrying out plugin runner on postprocessor file movement '{}'".format(
                         plugin_module.get('plugin_id')), message2=str(e), level="exception")
@@ -190,28 +173,16 @@ class PostProcessor(threading.Thread):
 
                 if data.get('copy_file'):
                     # Copy the file
-                    self._log("Copying file {} --> {}".format(data.get('file_in'), data.get('file_out')))
-                    try:
-                        # before_checksum = self.create_file_hash(data.get('file_in'))
-                        file_in = os.path.abspath(data.get('file_in'))
-                        file_out = os.path.abspath((data.get('file_out')))
-                        if not os.path.exists(file_in):
-                            self._log("Error - file_in path does not exist! '{}'".format(file_in), level="error")
-                            time.sleep(1)
-                        shutil.copyfile(file_in, file_out)
-                        #after_checksum = self.create_file_hash(data.get('file_out'))
-                        # Compare the checksums on the copied file to ensure it is still correct
-                        #if before_checksum != after_checksum:
-                        #    # Something went wrong during that file copy
-                        #    self._log("Copy function failed during postprocessor file movement '{}' on file '{}'".format(
-                        #        plugin_module.get('plugin_id'), cache_path), level='warning')
-                        #    file_move_processes_success = False
-                        #else:
-                        destination_files.append(data.get('file_out'))
-                    except Exception as e:
-                        self._log("Exception while copying file {} to {}:".format(data.get('file_in'), data.get('file_out')),
-                                  message2=str(e), level="exception")
+                    file_in = os.path.abspath(data.get('file_in'))
+                    file_out = os.path.abspath(data.get('file_out'))
+                    if not self.__copy_file(file_in, file_out, destination_files, plugin_module.get('plugin_id')):
                         file_move_processes_success = False
+
+            # Run the default post-process file movement.
+            # This will always move the file back to the original location.
+            # If that original location is the same file name, it will overwrite the original file.
+            if not self.__copy_file(cache_path, destination_data.get('abspath'), destination_files, 'DEFAULT'):
+                file_move_processes_success = False
 
             # Check if the remove source flag is still True after all plugins have run. If so, we will remove the source file
             if data.get('remove_source_file'):
@@ -219,11 +190,6 @@ class PostProcessor(threading.Thread):
                 if file_move_processes_success:
                     self._log("Removing source: {}".format(source_data['abspath']))
                     os.remove(source_data['abspath'])
-
-                    # If we need to keep the filename history, do that here
-                    if self.settings.get_keep_filename_history():
-                        dirname = os.path.dirname(source_data['abspath'])
-                        self.keep_filename_history(dirname, destination_data["basename"], source_data["basename"])
                 else:
                     self._log(
                         "Keeping source file '{}'. Not all postprocessor file movement functions completed.".format(
@@ -239,7 +205,7 @@ class PostProcessor(threading.Thread):
                       level='warning')
 
         # Fetch all 'postprocessor.task_result' plugin modules
-        plugin_modules = plugin_handler.get_plugin_modules_by_type('postprocessor.task_result')
+        plugin_modules = plugin_handler.get_enabled_plugin_modules_by_type('postprocessor.task_result')
 
         for plugin_module in plugin_modules:
             data = {
@@ -247,7 +213,6 @@ class PostProcessor(threading.Thread):
                 'task_processing_success':     self.current_task.task.success,
                 'file_move_processes_success': file_move_processes_success,
                 'destination_files':           destination_files,
-
             }
 
             # Run plugin and fetch return data
@@ -271,36 +236,47 @@ class PostProcessor(threading.Thread):
             self._log("Removing task cache directory '{}'".format(task_cache_directory))
             os.rmdir(task_cache_directory)
 
-    def validate_streams(self, abspath):
-        # Read video information for the input file
+    @staticmethod
+    def __get_file_checksum(path):
+        """
+        Read a checksum of a file.
+
+        Rather than opening the whole file in memory, open it in chunks.
+        This is slightly slower, but allows working on systems with limited memory.
+
+        :param path:
+        :return:
+        """
+        file_hash = hashlib.md5()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b''):
+                file_hash.update(chunk)
+        return file_hash.hexdigest()
+
+    def __copy_file(self, file_in, file_out, destination_files, plugin_id):
+        self._log("Copying file {} --> {}".format(file_in, file_out))
         try:
-            file_probe = self.ffmpeg.file_probe(abspath)
-        except unffmpeg.exceptions.ffprobe.FFProbeError as e:
-            self._log("Exception in method validate_streams", str(e), level='exception')
-            return False
+            #before_checksum = self.__get_file_checksum(file_in)
+            if not os.path.exists(file_in):
+                self._log("Error - file_in path does not exist! '{}'".format(file_in), level="error")
+                time.sleep(1)
+            shutil.copyfile(file_in, file_out)
+            #after_checksum = self.__get_file_checksum(file_out)
+            # Compare the checksums on the copied file to ensure it is still correct
+            #if before_checksum != after_checksum:
+            #    # Something went wrong during that file copy
+            #    self._log("Copy function failed during postprocessor file movement '{}' on file '{}'".format(
+            #        plugin_id, file_in), level='warning')
+            #    file_move_processes_success = False
+            #else:
+            destination_files.append(file_out)
+            file_move_processes_success = True
+        except Exception as e:
+            self._log("Exception while copying file {} to {}:".format(file_in, file_out),
+                      message2=str(e), level="exception")
+            file_move_processes_success = False
 
-        # Default errors to true unless we find a stream that matches
-        video_errors = True if self.settings.get_enable_video_encoding() else False
-        audio_errors = False
-        for stream in file_probe['streams']:
-            if stream['codec_type'] == 'video':
-                if self.settings.get_enable_video_encoding():
-                    # Check if this file is the right codec
-                    if stream['codec_name'] == self.settings.get_video_codec():
-                        video_errors = False
-                        continue
-                    elif self.settings.get_debugging():
-                        self._log(
-                            "File is the not correct codec {} - {} :: {}".format(self.settings.get_video_codec(), abspath,
-                                                                                 stream['codec_name']))
-                    # TODO: Test duration is the same as src
-                    # TODO: Add file checksum from before and after move
-                else:
-                    video_errors = None
-
-        if not video_errors and not audio_errors:
-            return True
-        return False
+        return file_move_processes_success
 
     def write_history_log(self):
         """
@@ -312,58 +288,14 @@ class PostProcessor(threading.Thread):
         history_logging = history.History()
         task_dump = self.current_task.task_dump()
 
-        try:
-            destination_data = self.current_task.get_destination_data()
-            destination_file_probe = self.ffmpeg.file_probe(destination_data['abspath'])
-            file_probe_format = destination_file_probe.get('format', {})
-
-            destination_data.update(
-                {
-                    'bit_rate':         file_probe_format.get('bit_rate', ''),
-                    'format_long_name': file_probe_format.get('format_long_name', ''),
-                    'format_name':      file_probe_format.get('format_name', ''),
-                    'size':             file_probe_format.get('size', ''),
-                    'duration':         file_probe_format.get('duration', ''),
-                    'streams':          destination_file_probe.get('streams', [])
-                }
-            )
-            task_dump['file_probe_data']['destination'] = destination_data
-        except unffmpeg.exceptions.ffprobe.FFProbeError as e:
-            self._log("Exception in method write_history_log", str(e), level='exception')
-        except Exception as e:
-            self._log("Exception in method write_history_log", str(e), level='exception')
-
         history_logging.save_task_history(
             {
                 'task_label':          task_dump.get('task_label', ''),
+                'abspath':             task_dump.get('abspath', ''),
                 'task_success':        task_dump.get('task_success', ''),
                 'start_time':          task_dump.get('start_time', ''),
                 'finish_time':         task_dump.get('finish_time', ''),
                 'processed_by_worker': task_dump.get('processed_by_worker', ''),
-                'task_dump':           task_dump,
+                'log':                 task_dump.get('log', ''),
             }
         )
-
-    def keep_filename_history(self, basedir, newname, originalname):
-        """
-        Write filename history in file_info (Filebot pattern useful for download subtitles using original filename)
-
-        :return:
-        """
-        fileinfo = FileInfo("{}/file_info".format(basedir))
-        fileinfo.load()
-        fileinfo.append(newname, originalname)
-        fileinfo.save()
-
-    def create_file_hash(self, filename):
-        """
-        Generate an MD5 has of the file
-
-        :return:
-        """
-        with open(filename, "rb") as f:
-            file_hash = hashlib.md5()
-            while chunk := f.read(8192):
-                file_hash.update(chunk)
-        
-        return file_hash.hexdigest()

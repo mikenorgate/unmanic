@@ -121,6 +121,21 @@ class FileTest(object):
         # That pathname was found in the results of failed historic tasks
         return True
 
+    def file_success_in_history(self):
+        """
+        Check if file has already succeeded in history
+
+        :return:
+        """
+        # Fetch historical tasks
+        history_logging = history.History()
+        task_results = history_logging.get_historic_tasks_list_with_source_probe(abspath=self.path, task_success=True)
+        if not task_results:
+            # No results were found matching that pathname
+            return False
+        # That pathname was found in the results of succeeded historic tasks
+        return True
+
     def file_ends_in_allowed_search_extensions(self):
         """
         Check if the file is in the allowed search extensions
@@ -167,6 +182,10 @@ class FileTest(object):
 
         :return:
         """
+        # Check if file has succeeded in history.
+        if self.file_success_in_history():
+            return False
+
         return_value = True
         file_issues = []
 

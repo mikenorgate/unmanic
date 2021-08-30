@@ -192,22 +192,22 @@ class PostProcessor(threading.Thread):
                     # Copy the file
                     self._log("Copying file {} --> {}".format(data.get('file_in'), data.get('file_out')))
                     try:
-                        before_checksum = self.create_file_hash(data.get('file_in'))
+                        # before_checksum = self.create_file_hash(data.get('file_in'))
                         file_in = os.path.abspath(data.get('file_in'))
                         file_out = os.path.abspath((data.get('file_out')))
                         if not os.path.exists(file_in):
                             self._log("Error - file_in path does not exist! '{}'".format(file_in), level="error")
                             time.sleep(1)
                         shutil.copyfile(file_in, file_out)
-                        after_checksum = self.create_file_hash(data.get('file_out'))
+                        #after_checksum = self.create_file_hash(data.get('file_out'))
                         # Compare the checksums on the copied file to ensure it is still correct
-                        if before_checksum != after_checksum:
-                            # Something went wrong during that file copy
-                            self._log("Copy function failed during postprocessor file movement '{}' on file '{}'".format(
-                                plugin_module.get('plugin_id'), cache_path), level='warning')
-                            file_move_processes_success = False
-                        else:
-                            destination_files.append(data.get('file_out'))
+                        #if before_checksum != after_checksum:
+                        #    # Something went wrong during that file copy
+                        #    self._log("Copy function failed during postprocessor file movement '{}' on file '{}'".format(
+                        #        plugin_module.get('plugin_id'), cache_path), level='warning')
+                        #    file_move_processes_success = False
+                        #else:
+                        destination_files.append(data.get('file_out'))
                     except Exception as e:
                         self._log("Exception while copying file {} to {}:".format(data.get('file_in'), data.get('file_out')),
                                   message2=str(e), level="exception")

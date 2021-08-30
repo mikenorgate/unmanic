@@ -32,6 +32,7 @@
 import os
 import threading
 import time
+from pathlib import Path
 
 try:
     from watchdog.observers import Observer
@@ -104,8 +105,9 @@ class EventHandler(FileSystemEventHandler):
         self.__handle_event(event)
 
     def on_created(self, event):
-        # self._log("CREATED event detected:", event.src_path)
-        pass
+        self._log("CREATED event detected:", event.src_path)
+        if(Path(event.src_path).stat().st_size > 0):
+            self.__handle_event(event)    
 
     def on_deleted(self, event):
         # self._log("DELETE event detected:", event.src_path)

@@ -142,9 +142,11 @@ class AudioCodecHandle(object):
                     else:
                         self.copy_stream(stream)
 
-                    # If we have enabled stream cloning and this stream has more than 2 channels
-                    if self.enable_audio_stream_stereo_cloning and stream['channels'] > 2:
-                        self.clone_stereo_stream(stream)
+        # If we have enabled stream cloning and don't already have a stereo stream
+        if self.enable_audio_stream_stereo_cloning and not self.has_stereo_stream():
+            for stream in self.file_probe['streams']:
+                if stream['codec_type'] == 'audio' and stream['channels'] > 2:
+                    self.clone_stereo_stream(stream)
 
         return self.encoding_args
 
@@ -167,3 +169,15 @@ class AudioCodecHandle(object):
         codec = audio_codecs.grab_module(codec_name)
         self.audio_codec_transcoding = codec_name
         self.audio_encoder_transcoding = codec.codec_default_encoder()
+
+    def has_stereo_stream(self):
+        """
+        Check if there is already a stereo stream
+
+        :return:
+        """
+        for stream in self.file_probe['streams']:
+            if stream['codec_type'] == 'audio' and stream['channels'] == 2:
+                return True
+        
+        return False

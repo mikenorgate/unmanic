@@ -294,7 +294,8 @@ class Worker(threading.Thread):
             # Fetch file out details
             # This creates a temp file labeled "WORKING" that will be moved to the cache_path on completion
             split_file_out = os.path.splitext(task_cache_path)
-            file_out = "{}-{}-{}{}".format(split_file_out[0], "WORKING", runner_count, split_file_out[1])
+            split_file_in = os.path.splitext(file_in)
+            file_out = "{}-{}-{}{}".format(split_file_out[0], "WORKING", runner_count, split_file_in[1])
 
             # Generate/Reset the data for the runner functions
             data = {
@@ -335,13 +336,37 @@ class Worker(threading.Thread):
                     # Exec command as subprocess
                     success = self.__exec_command_subprocess(data)
 
+                    if self.redundant_flag.is_set():
+                        # This worker has been marked as redundant. It is being terminated.
+                        self._log("Worker has been terminated before a command was completed", level="warning")
+                        # Mark runner as failed
+                        self.worker_runners_info[plugin_module.get('plugin_id')]['success'] = False
+                        # Set overall success status to failed
+                        overall_success = False
+                        # Append long entry to say the worker was terminated
+                        self.worker_log.append("\n\nWORKER TERMINATED!")
+                        # Don't continue
+                        break
+
                     # Run command. Check if command exited successfully.
                     if success:
                         # If file conversion was successful
                         self._log("Successfully ran worker process '{}' on file '{}'".format(plugin_module.get('plugin_id'),
                                                                                              data.get("file_in")))
-                        # Set the file in as the file out for the next loop
+                        # Ensure the 'file_out' that was specified by the plugin to be created was actually created.
                         if os.path.exists(data.get('file_out')):
+                            # The outfile exists...
+                            # In order to clean up as we go and avoid unnecessary RAM/disk use in the cache directory,
+                            #   we want to removed the 'file_in' file.
+                            # We want to ensure that we do not accidentally remove any original files here.
+                            # To avoid this, run x2 tests.
+                            # First, check current 'file_in' is not the original file.
+                            if os.path.abspath(file_in) != os.path.abspath(original_abspath):
+                                # Second, check that the 'file_in' is in cache directory.
+                                if "unmanic_file_conversion" in os.path.abspath(file_in):
+                                    # Remove this file
+                                    os.remove(os.path.abspath(file_in))
+                            # Set the new 'file_in' as the previous runner's 'file_out' for the next loop
                             file_in = data.get("file_out")
                     else:
                         # If file conversion was successful
@@ -379,11 +404,21 @@ class Worker(threading.Thread):
         if overall_success:
             # If jobs carried out on this task were all successful, we will get here
             self._log("Successfully converted file '{}'".format(original_abspath))
+
+            # Check that the current file out is not the original source file
+            if os.path.abspath(current_file_out) == os.path.abspath(original_abspath):
+                # The current file out is not a cache file, the file must have never been modified.
+                # This can happen if all Plugins failed to run, or a Plugin specifically reset the out
+                #   file to the original source in order to preserve it.
+                # In this circumstance, we want to do nothing. Just log it for debugging and let the process continue
+                self._log("Final cache file is the same path as the original source.", level='debug')
+
+            # Attempt to move the final output file to the final cache file path for the postprocessor
             try:
                 # Set the new file out as the extension may have changed
                 split_file_name = os.path.splitext(current_file_out)
                 file_extension = split_file_name[1].lstrip('.')
-                cache_directory = os.path.dirname(os.path.abspath(current_file_out))
+                cache_directory = os.path.dirname(os.path.abspath(task_cache_path))
                 self.current_task.set_cache_path(cache_directory, file_extension)
                 # Read the updated cache path
                 task_cache_path = self.current_task.get_cache_path()
@@ -395,7 +430,7 @@ class Worker(threading.Thread):
                 # There is a really odd intermittent bug with the shutil module that is causing it to
                 #   sometimes report that the file does not exist.
                 # This section adds a small pause and logs the error if that is the case.
-                # I have not yet figured out a soltion as this is difficult to reproduce.
+                # I have not yet figured out a solution as this is difficult to reproduce.
                 if not os.path.exists(current_file_out):
                     self._log("Error - current_file_out path does not exist! '{}'".format(file_in), level="error")
                     time.sleep(1)
@@ -529,7 +564,8 @@ class Worker(threading.Thread):
                         continue
 
             # Get the final output and the exit status
-            communicate = sub_proc.communicate()[0]
+            if not self.redundant_flag.is_set():
+                communicate = sub_proc.communicate()[0]
 
             # If the process is still running, kill it
             if proc.is_running():

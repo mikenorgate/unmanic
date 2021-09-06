@@ -185,7 +185,34 @@ class Foreman(threading.Thread):
     def check_for_idle_workers(self):
         for thread in self.worker_threads:
             if self.worker_threads[thread].idle and self.worker_threads[thread].isAlive():
-                return True
+                if not self.worker_threads[thread].paused:
+                    return True
+        return False
+
+    def postprocessor_queue_full(self):
+        """
+        Check if Post-processor queue is greater than the number of workers enabled.pluginEnabledLimits
+        If it is, return True. Else False.
+
+        :return:
+        """
+        frontend_messages = self.data_queues.get('frontend_messages')
+        limit = self.get_worker_count()
+        if len(self.task_queue.list_processed_tasks()) > limit:
+            self._log("Postprocessor queue is over {}. Halting feeding workers until it drops.".format(limit), level='warning')
+            frontend_messages.update(
+                {
+                    'id':      'pendingTaskHaltedPostProcessorQueueFull',
+                    'type':    'status',
+                    'code':    'pendingTaskHaltedPostProcessorQueueFull',
+                    'message': '',
+                    'timeout': 0
+                }
+            )
+            return True
+
+        # Remove the status notification
+        frontend_messages.remove_item('pendingTaskHaltedPostProcessorQueueFull')
         return False
 
     def pause_worker_thread(self, worker_id):
@@ -220,6 +247,23 @@ class Foreman(threading.Thread):
             return False
 
         self.worker_threads[worker_id].paused_flag.clear()
+        return True
+
+    def terminate_worker_thread(self, worker_id):
+        """
+        Terminate a single worker thread
+
+        :param worker_id:
+        :type worker_id:
+        :return:
+        :rtype:
+        """
+        self._log("Asked to terminate Worker ID '{}'".format(worker_id), level='debug')
+        if worker_id not in self.worker_threads:
+            self._log("Asked to terminate Worker ID '{}', but this was not found.".format(worker_id), level='warning')
+            return False
+
+        self.mark_worker_thread_as_redundant(worker_id)
         return True
 
     def mark_worker_thread_as_redundant(self, worker_id):
@@ -268,6 +312,11 @@ class Foreman(threading.Thread):
 
                     # Check if we are able to start up a worker for another encoding job
                     if self.workers_pending_task_queue.full():
+                        continue
+
+                    # Check if postprocessor task queue is full
+                    if self.postprocessor_queue_full():
+                        time.sleep(3)
                         continue
 
                     next_item_to_process = self.task_queue.get_next_pending_tasks()

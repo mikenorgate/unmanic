@@ -430,6 +430,11 @@
                         "description": "The current priority (higher is greater)",
                         "example": 100
                     },
+                    "type": {
+                        "type": "string",
+                        "description": "The type of the pending task - local or remote",
+                        "example": "local"
+                    },
                     "status": {
                         "type": "string",
                         "description": "The current status of the pending task",
@@ -440,7 +445,8 @@
                     "abspath",
                     "id",
                     "priority",
-                    "status"
+                    "status",
+                    "type"
                 ]
             },
             "PendingTasks": {
@@ -655,7 +661,12 @@
                 "properties": {
                     "plugin_id": {
                         "type": "string",
-                        "example": "dts_to_dd"
+                        "example": "encoder_video_hevc_vaapi"
+                    },
+                    "repo_id": {
+                        "type": "string",
+                        "description": "The ID of the repository that this plugin is in",
+                        "example": "158899500680826593283708490873332175078"
                     },
                     "prefer_local": {
                         "type": "boolean",
@@ -812,7 +823,7 @@
                 "properties": {
                     "plugin_id": {
                         "type": "string",
-                        "example": "dts_to_dd"
+                        "example": "encoder_video_hevc_vaapi"
                     },
                     "settings": {
                         "description": "The plugin settings",
@@ -887,6 +898,16 @@
                         "type": "string",
                         "description": "The plugin package download URL",
                         "example": "https://raw.githubusercontent.com/Unmanic/unmanic-plugins/repo/plugin_id/changelog.md"
+                    },
+                    "repo_name": {
+                        "type": "string",
+                        "description": "The name of the repository that this plugin is in",
+                        "example": "Official Repo"
+                    },
+                    "repo_id": {
+                        "type": "string",
+                        "description": "The ID of the repository that this plugin is in",
+                        "example": "158899500680826593283708490873332175078"
                     }
                 },
                 "required": [
@@ -921,7 +942,12 @@
                 "properties": {
                     "plugin_id": {
                         "type": "string",
-                        "example": "dts_to_dd"
+                        "example": "encoder_video_hevc_vaapi"
+                    },
+                    "repo_id": {
+                        "type": "string",
+                        "description": "The ID of the repository that this plugin is in",
+                        "example": "158899500680826593283708490873332175078"
                     }
                 },
                 "required": [
@@ -1481,7 +1507,7 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Success: Deleted a list of completed tasks.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -1549,7 +1575,7 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Success: Requested list of items to reprocess.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -1751,7 +1777,7 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Success: Deleted a list of pending tasks.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -1819,11 +1845,263 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Success: Reorder a list of pending tasks.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/BaseSuccess"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/pending/status/get": {
+            "post": {
+                "description": "Set the status of a list of pending tasks",
+                "requestBody": {
+                    "description": "Set the status of a list of pending tasks.",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RequestTableUpdateByIdList"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Sample response: Returns a list of tasks with their status.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PendingTasksTableResults"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/pending/status/set/ready": {
+            "post": {
+                "description": "Set the status of a list of created pending tasks as ready for processing",
+                "requestBody": {
+                    "description": "Set the status of a list of created pending tasks as ready for processing.",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RequestTableUpdateByIdList"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful request; Returns success status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BaseSuccess"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/pending/download/file/id/{task_id}": {
+            "get": {
+                "description": "Download the file of a pending task",
+                "responses": {
+                    "200": {
+                        "description": "Returns the task file.",
+                        "content": {
+                            "application/octet-stream": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/pending/download/data/id/{task_id}": {
+            "get": {
+                "description": "Returns the completed tasks data",
+                "responses": {
+                    "200": {
+                        "description": "Returns the task file.",
+                        "content": {
+                            "application/octet-stream": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
                                 }
                             }
                         }
@@ -1955,7 +2233,7 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Success: Deleted a list of completed tasks.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -2023,7 +2301,7 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Success: Deleted a list of completed tasks.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -2091,7 +2369,7 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Success: Deleted a list of completed tasks.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -2159,7 +2437,7 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Success: Deleted a list of completed tasks.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -2295,7 +2573,7 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Sample response: Saves the settings of a single plugin.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -2420,7 +2698,7 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Sample response: Installs a plugin by its Plugin ID.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -2681,7 +2959,7 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Sample response: Updates the plugin repo list.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -2795,7 +3073,7 @@
                 "description": "Reload plugin repositories remote data.",
                 "responses": {
                     "200": {
-                        "description": "Success: Reload plugin repositories remote data.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -2966,7 +3244,7 @@
                 "description": "Reload the current session.",
                 "responses": {
                     "200": {
-                        "description": "Success: Reloaded the current session.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -3091,7 +3369,7 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Success: Saved a given dictionary of settings.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -3153,6 +3431,80 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/SettingsSystemConfig"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/upload/pending/file": {
+            "post": {
+                "description": "Returns a list of pending tasks.",
+                "requestBody": {
+                    "description": "Returns a list of pending tasks.",
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "fileName": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful request; Returns success status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BaseSuccess"
                                 }
                             }
                         }
@@ -3273,7 +3625,7 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Sample response: Pauses a worker by its ID.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -3330,7 +3682,7 @@
                 "description": "Pause all workers.",
                 "responses": {
                     "200": {
-                        "description": "Sample response: Pause all workers.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -3398,7 +3750,7 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Sample response: Resumes a worker by its ID.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -3455,7 +3807,7 @@
                 "description": "Resumes all workers.",
                 "responses": {
                     "200": {
-                        "description": "Sample response: Resumes all workers.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -3523,7 +3875,7 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Sample response: Terminates a worker by its ID.",
+                        "description": "Successful request; Returns success status",
                         "content": {
                             "application/json": {
                                 "schema": {

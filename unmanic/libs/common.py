@@ -29,8 +29,9 @@
            OR OTHER DEALINGS IN THE SOFTWARE.
 
 """
-
+import copy
 import datetime
+import hashlib
 import os
 import random
 import string
@@ -149,7 +150,8 @@ def clean_files_in_dir(directory):
     """This will completely wipe all contents from a directory"""
     if os.path.exists(directory):
         for root, subFolders, files in os.walk(directory):
-            if os.path.basename(root).startswith("unmanic_file_conversion"):
+            root_bn = os.path.basename(root)
+            if root_bn.startswith("unmanic_file_conversion") or root_bn.startswith("unmanic_remote_pending_library"):
                 print("Clearing cache path - {}".format(root))
                 try:
                     shutil.rmtree(root)
@@ -232,3 +234,21 @@ def extract_video_codecs_from_file_properties(file_properties: dict):
         if stream['codec_type'] == 'video':
             codecs.append(stream['codec_name'])
     return codecs
+
+
+def get_file_checksum(path):
+    """
+    Read a checksum of a file.
+
+    Rather than opening the whole file in memory, open it in chunks.
+    This is slightly slower, but allows working on systems with limited memory.
+
+    :param path:
+    :return:
+    """
+    file_hash = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b''):
+            file_hash.update(chunk)
+    return copy.copy(file_hash.hexdigest())
+

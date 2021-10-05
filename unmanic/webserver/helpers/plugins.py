@@ -148,6 +148,11 @@ def get_enabled_plugin_data_panels():
     return plugin_handler.get_enabled_plugin_modules_by_type('frontend.panel')
 
 
+def exec_plugin_runner(data, plugin_id):
+    plugin_handler = PluginsHandler()
+    return plugin_handler.exec_plugin_runner(data, plugin_id, 'frontend.panel')
+
+
 def save_enabled_plugin_flows_for_plugin_type(plugin_type, plugin_flow):
     plugins = PluginsHandler()
     return plugins.set_plugin_flow(plugin_type, plugin_flow)
@@ -412,17 +417,18 @@ def prepare_installable_plugins_list():
     return plugins.get_installable_plugins_list()
 
 
-def install_plugin_by_id(plugin_id):
+def install_plugin_by_id(plugin_id, repo_id=None):
     """
     Install a plugin given its Plugin ID
 
     :param plugin_id:
+    :param repo_id:
     :return:
     """
 
     # Fetch a list of plugin data cached locally
     plugins = PluginsHandler()
-    return plugins.install_plugin_by_id(plugin_id)
+    return plugins.install_plugin_by_id(plugin_id, repo_id)
 
 
 def save_plugin_repos_list(repos_list):

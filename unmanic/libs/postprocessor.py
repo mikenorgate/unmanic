@@ -29,7 +29,6 @@
            OR OTHER DEALINGS IN THE SOFTWARE.
 
 """
-import hashlib
 import os
 import shutil
 import threading
@@ -99,12 +98,20 @@ class PostProcessor(threading.Thread):
                         self._log("Post-processing task - {}".format(self.current_task.get_source_abspath()))
                     except Exception as e:
                         self._log("Exception in fetching task absolute path", message2=str(e), level="exception")
-                    # Post process the converted file (return it to original directory etc.)
-                    self.post_process_file()
-                    # Write source and destination data to historic log
-                    self.write_history_log()
-                    # Remove file from task queue
-                    self.current_task.delete()
+                    if self.current_task.get_task_type() == 'local':
+                        # Post process the converted file (return it to original directory etc.)
+                        self.post_process_file()
+                        # Write source and destination data to historic log
+                        self.write_history_log()
+                        # Remove file from task queue
+                        self.current_task.delete()
+                    else:
+                        # Post process the remote converted file (return it to original directory etc.)
+                        self.post_process_remote_file()
+                        # Write source and destination data to historic log
+                        self.dump_history_log()
+                        # Update the task status to 'complete'
+                        self.current_task.set_status('complete')
 
         self._log("Leaving PostProcessor Monitor loop...")
 
@@ -154,20 +161,15 @@ class PostProcessor(threading.Thread):
             for plugin_module in plugin_modules:
                 # Always set source_data to the original file's source_data
                 data["source_data"] = source_data
-                # Always set copy_file to True
-                data["copy_file"] = True
+                # Always set copy_file to False
+                data["copy_file"] = False
                 # Always set file in to cache path
                 data["file_in"] = cache_path
                 # Always set file out to destination data absolute path
                 data["file_out"] = destination_data.get('abspath')
 
-                # Run plugin and fetch return data
-                plugin_runner = plugin_module.get("runner")
-                try:
-                    plugin_runner(data)
-                except Exception as e:
-                    self._log("Exception while carrying out plugin runner on postprocessor file movement '{}'".format(
-                        plugin_module.get('plugin_id')), message2=str(e), level="exception")
+                # Run plugin to update data
+                if not plugin_handler.exec_plugin_runner(data, plugin_module.get('plugin_id'), 'postprocessor.file_move'):
                     # Do not continue with this plugin module's loop
                     continue
 
@@ -177,24 +179,33 @@ class PostProcessor(threading.Thread):
                     file_out = os.path.abspath(data.get('file_out'))
                     if not self.__copy_file(file_in, file_out, destination_files, plugin_module.get('plugin_id')):
                         file_move_processes_success = False
-
-            # Run the default post-process file movement.
-            # This will always move the file back to the original location.
-            # If that original location is the same file name, it will overwrite the original file.
-            if not self.__copy_file(cache_path, destination_data.get('abspath'), destination_files, 'DEFAULT'):
-                file_move_processes_success = False
-
-            # Check if the remove source flag is still True after all plugins have run. If so, we will remove the source file
-            if data.get('remove_source_file'):
-                # Only carry out a source removal if the whole postprocess was successful
-                if file_move_processes_success:
-                    self._log("Removing source: {}".format(source_data['abspath']))
-                    os.remove(source_data['abspath'])
                 else:
-                    self._log(
-                        "Keeping source file '{}'. Not all postprocessor file movement functions completed.".format(
-                            source_data['abspath']), level="warning")
+                    self._log("Plugin did not request a file copy ({})".format(plugin_module.get('plugin_id')), level='debug')
 
+            # Only carry out final post-processor file moments if all others were successful
+            if file_move_processes_success:
+                # Run the default post-process file movement.
+                # This will always move the file back to the original location.
+                # If that original location is the same file name, it will overwrite the original file.
+                if destination_data.get('abspath') == source_data.get('abspath'):
+                    # Only run the final file copy to overwrite the source file if the remove_source_file flag was never set
+                    if not data.get('remove_source_file'):
+                        if not self.__copy_file(cache_path, destination_data.get('abspath'), destination_files, 'DEFAULT'):
+                            file_move_processes_success = False
+                elif not self.__copy_file(cache_path, destination_data.get('abspath'), destination_files, 'DEFAULT'):
+                    file_move_processes_success = False
+
+                # Check if the remove source flag is still True after all plugins have run. If so, we will remove the source file
+                if data.get('remove_source_file'):
+                    # Only carry out a source removal if the file exists and the final copy was also successful
+                    if file_move_processes_success and os.path.exists(source_data.get('abspath')):
+                        self._log("Removing source: {}".format(source_data.get('abspath')))
+                        os.remove(source_data.get('abspath'))
+                    else:
+                        self._log("Keeping source file '{}'. Not all postprocessor file movement functions completed.".format(
+                            source_data.get('abspath')), level="warning")
+
+            # Log a final error if not all file moments were successful
             if not file_move_processes_success:
                 self._log(
                     "Error while running postprocessor file movement on file '{}'. Not all postprocessor file movement functions completed.".format(
@@ -215,16 +226,53 @@ class PostProcessor(threading.Thread):
                 'destination_files':           destination_files,
             }
 
-            # Run plugin and fetch return data
-            plugin_runner = plugin_module.get("runner")
-            try:
-                plugin_runner(data)
-            except Exception as e:
-                self._log("Exception while carrying out plugin runner on postprocessor task result '{}'".format(
-                    plugin_module.get('plugin_id')), message2=str(e), level="exception")
+            # Run plugin to update data
+            if not plugin_handler.exec_plugin_runner(data, plugin_module.get('plugin_id'), 'postprocessor.task_result'):
+                # Do not continue with this plugin module's loop
                 continue
 
         # Cleanup cache files
+        self.__cleanup_cache_files(cache_path)
+
+    def post_process_remote_file(self):
+        """
+        Process remote files.
+        Remote files are not processed by plugins.
+
+        TODO: Should we move remote tasks to a permanent download location within the cache path? Possibly not...
+
+        :return:
+        """
+        # Read current task data
+        cache_path = self.current_task.get_cache_path()
+        source_data = self.current_task.get_source_data()
+        destination_data = self.current_task.get_destination_data()
+
+        # Remove the source
+        if os.path.exists(source_data.get('abspath')):
+            self._log("Removing remote source: {}".format(source_data.get('abspath')))
+            os.remove(source_data.get('abspath'))
+        else:
+            self._log("Remote source file '{}' does not exist!".format(source_data.get('abspath')), level="warning")
+
+        # Copy final cache file to original directory
+        self.__copy_file(cache_path, destination_data.get('abspath'), [], 'DEFAULT')
+
+        # Cleanup cache files
+        self.__cleanup_cache_files(cache_path)
+
+        # Modify the task abspath - this may be different now
+        self.current_task.modify_path(destination_data.get('abspath'))
+
+    def __cleanup_cache_files(self, cache_path):
+        """
+        Remove cache files and the cache directory
+        This ensure we are not simply blindly removing a whole directory.
+        It ensures were are in-fact only deleting this task's cache files.
+
+        :param cache_path:
+        :return:
+        """
         task_cache_directory = os.path.dirname(cache_path)
         if os.path.exists(task_cache_directory) and "unmanic_file_conversion" in task_cache_directory:
             for f in os.listdir(task_cache_directory):
@@ -236,25 +284,8 @@ class PostProcessor(threading.Thread):
             self._log("Removing task cache directory '{}'".format(task_cache_directory))
             os.rmdir(task_cache_directory)
 
-    @staticmethod
-    def __get_file_checksum(path):
-        """
-        Read a checksum of a file.
-
-        Rather than opening the whole file in memory, open it in chunks.
-        This is slightly slower, but allows working on systems with limited memory.
-
-        :param path:
-        :return:
-        """
-        file_hash = hashlib.md5()
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b''):
-                file_hash.update(chunk)
-        return file_hash.hexdigest()
-
     def __copy_file(self, file_in, file_out, destination_files, plugin_id):
-        self._log("Copying file {} --> {}".format(file_in, file_out))
+        self._log("Copy file triggered by ({}) {} --> {}".format(plugin_id, file_in, file_out))
         try:
             #before_checksum = self.__get_file_checksum(file_in)
             if not os.path.exists(file_in):
@@ -299,3 +330,26 @@ class PostProcessor(threading.Thread):
                 'log':                 task_dump.get('log', ''),
             }
         )
+
+    def dump_history_log(self):
+        self._log("Dumping remote task history log.", level='debug')
+        task_dump = self.current_task.task_dump()
+        destination_data = self.current_task.get_destination_data()
+
+        # Dump history log as metadata in the file's path
+        tasks_data_file = os.path.join(os.path.dirname(destination_data.get('abspath')), 'data.json')
+        result = common.json_dump_to_file(
+            {
+                'task_label':          task_dump.get('task_label', ''),
+                'abspath':             task_dump.get('abspath', ''),
+                'task_success':        task_dump.get('task_success', ''),
+                'start_time':          task_dump.get('start_time', ''),
+                'finish_time':         task_dump.get('finish_time', ''),
+                'processed_by_worker': task_dump.get('processed_by_worker', ''),
+                'log':                 task_dump.get('log', ''),
+            }
+            , tasks_data_file)
+        if not result['success']:
+            for message in result['errors']:
+                self._log("Exception:", message2=str(message), level="exception")
+            raise Exception("Exception in dumping completed task data to file")

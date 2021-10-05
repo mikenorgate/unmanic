@@ -29,6 +29,7 @@
            OR OTHER DEALINGS IN THE SOFTWARE.
 
 """
+import hashlib
 import os
 import queue
 import shutil
@@ -282,10 +283,17 @@ class Worker(threading.Thread):
         current_file_out = original_abspath
         # The number of runners that have been run
         runner_count = 0
+        # Flag if a task has run a command
+        no_exec_command_run = True
 
         for plugin_module in plugin_modules:
             # Increment the runners count (first runner will be set as #1)
             runner_count += 1
+
+            if not overall_success:
+                # If one of the Plugins fails, don't continue.
+                # The Plugins could be co-dependant and the final file will not go anywhere if 'overall_success' is False
+                break
 
             # Mark the status of the worker for the frontend
             self.worker_runners_info[plugin_module.get('plugin_id')]['status'] = 'in_progress'
@@ -312,16 +320,18 @@ class Worker(threading.Thread):
                 runner_pass_count += 1
                 time.sleep(.2)  # Add delay for preventing loop maxing compute resources
 
-                # Run plugin and fetch return data
-                plugin_runner = plugin_module.get("runner")
-                try:
-                    plugin_runner(data)
-                except Exception as e:
-                    self._log("Exception while carrying out plugin runner on worker process '{}'".format(
-                        plugin_module.get('plugin_id')), message2=str(e), level="exception")
+                # Run plugin to update data
+                if not plugin_handler.exec_plugin_runner(data, plugin_module.get('plugin_id'), 'worker.process_item'):
                     # Skip this plugin module's loop
                     self.worker_runners_info[plugin_module.get('plugin_id')]['status'] = 'complete'
-                    continue
+                    self.worker_runners_info[plugin_module.get('plugin_id')]['success'] = False
+                    # Set overall success status to failed
+                    overall_success = False
+                    # Append long entry to say the worker was terminated
+                    self.worker_log.append("\n\nPLUGIN FAILED!")
+                    self.worker_log.append("Failed to execute Plugin '{}'".format(plugin_module.get('name')))
+                    self.worker_log.append("Check Unmanic logs for more information")
+                    break
 
                 # Log the in and out files returned by the plugin runner for debugging
                 self._log("Worker process '{}' (in)".format(plugin_module.get('plugin_id')), data.get("file_in"),
@@ -335,6 +345,7 @@ class Worker(threading.Thread):
 
                     # Exec command as subprocess
                     success = self.__exec_command_subprocess(data)
+                    no_exec_command_run = False
 
                     if self.redundant_flag.is_set():
                         # This worker has been marked as redundant. It is being terminated.
@@ -396,6 +407,12 @@ class Worker(threading.Thread):
             self.worker_runners_info[plugin_module.get('plugin_id')]['success'] = True
             self.worker_runners_info[plugin_module.get('plugin_id')]['status'] = 'complete'
 
+        # Log if no command was run by any Plugins
+        if no_exec_command_run:
+            # If no jobs were carried out on this task
+            self._log("No Plugin requested to run commands for this file '{}'".format(original_abspath), level='warning')
+            self.worker_log.append("\n\nNo Plugin requested to run commands for this file '{}'".format(original_abspath))
+
         # Save the completed command log
         self.current_task.save_command_log(self.worker_log)
 
@@ -403,15 +420,7 @@ class Worker(threading.Thread):
         # At this point we need to move the final out file to the original task cache path so the postprocessor can collect it.
         if overall_success:
             # If jobs carried out on this task were all successful, we will get here
-            self._log("Successfully converted file '{}'".format(original_abspath))
-
-            # Check that the current file out is not the original source file
-            if os.path.abspath(current_file_out) == os.path.abspath(original_abspath):
-                # The current file out is not a cache file, the file must have never been modified.
-                # This can happen if all Plugins failed to run, or a Plugin specifically reset the out
-                #   file to the original source in order to preserve it.
-                # In this circumstance, we want to do nothing. Just log it for debugging and let the process continue
-                self._log("Final cache file is the same path as the original source.", level='debug')
+            self._log("Successfully completed Worker processing on file '{}'".format(original_abspath))
 
             # Attempt to move the final output file to the final cache file path for the postprocessor
             try:
@@ -435,8 +444,27 @@ class Worker(threading.Thread):
                     self._log("Error - current_file_out path does not exist! '{}'".format(file_in), level="error")
                     time.sleep(1)
 
-                # Use shutil module to move the file to the final task cache location
-                shutil.move(current_file_out, task_cache_path)
+                # Ensure the cache directory exists
+                if not os.path.exists(cache_directory):
+                    os.makedirs(cache_directory)
+
+                # Create final cache file for post-processing
+                before_sum = common.get_file_checksum(current_file_out)
+                # Check that the current file out is not the original source file
+                if os.path.abspath(current_file_out) == os.path.abspath(original_abspath):
+                    # The current file out is not a cache file, the file must have never been modified.
+                    # This can happen if all Plugins failed to run, or a Plugin specifically reset the out
+                    #   file to the original source in order to preserve it.
+                    # In this circumstance, we want to create a cache copy and let the process continue.
+                    self._log("Final cache file is the same path as the original source. Creating cache copy.", level='debug')
+                    shutil.copyfile(current_file_out, task_cache_path)
+                else:
+                    # Use shutil module to move the file to the final task cache location
+                    shutil.move(current_file_out, task_cache_path)
+                after_sum = common.get_file_checksum(task_cache_path)
+                # Ensure the checksums match
+                if before_sum != after_sum:
+                    raise Exception("Checksum does not match after file movement: '{}' != '{}'".format(before_sum, after_sum))
             except Exception as e:
                 self._log("Exception in final move operation of file {} to {}:".format(current_file_out, task_cache_path),
                           message2=str(e), level="exception")
@@ -449,6 +477,31 @@ class Worker(threading.Thread):
         # Log the failure and return False
         self._log("Failed to convert file '{}'".format(original_abspath), level='warning')
         return False
+
+    def __copy_file(self, file_in, file_out, destination_files, plugin_id):
+        self._log("Copying file {} --> {}".format(file_in, file_out))
+        try:
+            before_checksum = self.__get_file_checksum(file_in)
+            if not os.path.exists(file_in):
+                self._log("Error - file_in path does not exist! '{}'".format(file_in), level="error")
+                time.sleep(1)
+            shutil.copyfile(file_in, file_out)
+            after_checksum = self.__get_file_checksum(file_out)
+            # Compare the checksums on the copied file to ensure it is still correct
+            if before_checksum != after_checksum:
+                # Something went wrong during that file copy
+                self._log("Copy function failed during postprocessor file movement '{}' on file '{}'".format(
+                    plugin_id, file_in), level='warning')
+                file_move_processes_success = False
+            else:
+                destination_files.append(file_out)
+                file_move_processes_success = True
+        except Exception as e:
+            self._log("Exception while copying file {} to {}:".format(file_in, file_out),
+                      message2=str(e), level="exception")
+            file_move_processes_success = False
+
+        return file_move_processes_success
 
     def __log_proc_terminated(self, proc):
         self._log("Process {} terminated with exit code {}".format(proc, proc.returncode))

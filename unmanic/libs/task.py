@@ -31,6 +31,7 @@
 """
 import json
 import os
+import shutil
 import time
 from operator import attrgetter
 
@@ -96,6 +97,8 @@ class Task(object):
         if not cache_directory:
             out_folder = "unmanic_file_conversion-{}".format(time.time())
             cache_directory = os.path.join(self.settings.get_cache_path(), out_folder)
+
+        # Set cache path class attribute
         self.task.cache_path = os.path.join(cache_directory, out_file)
 
     def get_task_data(self):
@@ -103,6 +106,11 @@ class Task(object):
             raise Exception('Unable to fetch task dictionary. Task has not been set!')
         self.task_dict = model_to_dict(self.task, backrefs=True)
         return self.task_dict
+
+    def get_task_type(self):
+        if not self.task:
+            raise Exception('Unable to fetch task type. Task has not been set!')
+        return self.task.type
 
     def get_cache_path(self):
         if not self.task:
@@ -165,7 +173,7 @@ class Task(object):
         # Get task matching the abspath
         self.task = Tasks.get(abspath=abspath)
 
-    def create_task_by_absolute_path(self, abspath):
+    def create_task_by_absolute_path(self, abspath, task_type='local'):
         """
         Creates the task by it's absolute path.
         If the task already exists in the list, then this will throw an exception and return false
@@ -173,11 +181,12 @@ class Task(object):
         Calls to read_and_set_task_by_absolute_path() to read back all data out of the database.
 
         :param abspath:
+        :param task_type:
         :return:
         """
         try:
             self.task = Tasks.create(abspath=abspath, status='creating')
-            self.save_task()
+            self.save()
             self._log("Created new task with ID: {} for {}".format(self.task, abspath), level="debug")
 
             # Set the cache path to use during the transcoding
@@ -186,9 +195,18 @@ class Task(object):
             # Set the default priority to the ID of the task
             self.task.priority = self.task.id
 
-            # Now set the status to pending. Only then will it be picked up by a worker.
-            # This will also save the task.
-            self.set_status('pending')
+            # Set the task type
+            self.task.type = task_type
+
+            # Only local tasks should be progressed automatically
+            # Remote tasks need to be progressed to pending by a remote trigger
+            if task_type == 'local':
+                # Now set the status to pending. Only then will it be picked up by a worker.
+                # This will also save the task.
+                self.set_status('pending')
+            else:
+                # Save the tasks updates without settings status to pending
+                self.save()
 
             return True
         except IntegrityError as e:
@@ -197,13 +215,14 @@ class Task(object):
 
     def set_status(self, status):
         """
-        Sets the task status to either 'pending', 'in_progress' or 'processed'
+        Sets the task status to either 'pending', 'in_progress', 'processed' or 'complete'
 
         :param status:
         :return:
         """
-        if status not in ['pending', 'in_progress', 'processed', 'complete']:
-            raise Exception('Unable to set status to "{}". Status must be either "pending", "in_progress", or "processed".')
+        allowed = ['pending', 'in_progress', 'processed', 'complete']
+        if status not in allowed:
+            raise Exception('Unable to set status to "{}". Status must be one of [{}].'.format(status, ', '.join(allowed)))
         if not self.task:
             raise Exception('Unable to set status. Task has not been set!')
         self.task.status = status
@@ -224,6 +243,18 @@ class Task(object):
             self.task.success = False
         self.save()
 
+    def modify_path(self, new_path):
+        """
+        Modifies the abspath attribute of this task
+
+        :param new_path:
+        :return:
+        """
+        if not self.task:
+            raise Exception('Unable to update abspath. Task has not been set!')
+        self.task.abspath = new_path
+        self.save()
+
     def save_command_log(self, log):
         """
         Sets the task command log
@@ -236,11 +267,6 @@ class Task(object):
         self.task.log += ''.join(log)
         self.save()
 
-    def save_task(self):
-        if not self.task:
-            raise Exception('Unable to save task. Task has not been set!')
-        self.task.save()
-
     def save(self):
         """
         Save task model object
@@ -249,9 +275,14 @@ class Task(object):
         """
         if not self.task:
             raise Exception('Unable to save Task. Task has not been set!')
-        self.save_task()
+        self.task.save()
 
     def delete(self):
+        """
+        Delete a task model object
+
+        :return:
+        """
         if not self.task:
             raise Exception('Unable to save Task. Task has not been set!')
         self.task.delete_instance()
@@ -261,7 +292,7 @@ class Task(object):
         return task_query.count()
 
     def get_task_list_filtered_and_sorted(self, order=None, start=0, length=None, search_value=None, id_list=None,
-                                          status=None):
+                                          status=None, task_type=None):
         try:
             query = (Tasks.select())
 
@@ -273,6 +304,9 @@ class Task(object):
 
             if status:
                 query = query.where(Tasks.status.in_([status]))
+
+            if task_type:
+                query = query.where(Tasks.type.in_([task_type]))
 
             # Get order by
             order_by = None
@@ -311,6 +345,13 @@ class Task(object):
 
             for task_id in query:
                 try:
+                    # Remote tasks need to be cleaned up from the cache partition also
+                    if task_id.type == 'remote':
+                        remote_task_dirname = task_id.abspath
+                        if os.path.exists(task_id.abspath) and "unmanic_remote_pending_library" in remote_task_dirname:
+                            self._log("Removing remote pending library task '{}'.".format(remote_task_dirname))
+                            shutil.rmtree(os.path.dirname(remote_task_dirname))
+
                     task_id.delete_instance(recursive=True)
                 except Exception as e:
                     # Catch delete exceptions
@@ -344,4 +385,15 @@ class Task(object):
         # If the direction is to send it to the bottom, then set the priority as 0
         query = Tasks.update(priority=Tasks.priority + new_priority_offset if (direction == "top") else 0).where(
             Tasks.id.in_(id_list))
+        return query.execute()
+
+    def set_tasks_status(self, id_list, status):
+        """
+        Updates the task status for a given list of tasks by ID
+
+        :param id_list:
+        :param status:
+        :return:
+        """
+        query = Tasks.update(status=status).where(Tasks.id.in_(id_list))
         return query.execute()

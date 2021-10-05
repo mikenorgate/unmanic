@@ -29,6 +29,7 @@
            OR OTHER DEALINGS IN THE SOFTWARE.
 
 """
+import os.path
 
 import tornado.log
 from unmanic.libs import session
@@ -61,6 +62,27 @@ class ApiPendingHandler(BaseApiHandler):
             "supported_methods": ["POST"],
             "call_method":       "reorder_pending_tasks",
         },
+        {
+            "path_pattern":      r"/pending/status/get",
+            "supported_methods": ["POST"],
+            "call_method":       "get_pending_status_of_tasks",
+        },
+        {
+            "path_pattern":      r"/pending/status/set/ready",
+            "supported_methods": ["POST"],
+            "call_method":       "set_pending_status_as_ready",
+        },
+        {
+            "path_pattern":      r"/pending/download/file/id/(?P<task_id>[0-9]+)?",
+            "supported_methods": ["GET"],
+            "call_method":       "download_pending_task_file",
+        },
+        {
+            "path_pattern":      r"/pending/download/data/id/(?P<task_id>[0-9]+)?",
+            "supported_methods": ["GET"],
+            "call_method":       "download_pending_task_data",
+        },
+
     ]
 
     def initialize(self, **kwargs):
@@ -158,7 +180,7 @@ class ApiPendingHandler(BaseApiHandler):
                         RequestTableUpdateByIdList
         responses:
             200:
-                description: 'Success: Deleted a list of pending tasks.'
+                description: 'Successful request; Returns success status'
                 content:
                     application/json:
                         schema:
@@ -219,7 +241,7 @@ class ApiPendingHandler(BaseApiHandler):
                         RequestPendingTasksReorderSchema
         responses:
             200:
-                description: 'Success: Reorder a list of pending tasks.'
+                description: 'Successful request; Returns success status'
                 content:
                     application/json:
                         schema:
@@ -258,6 +280,269 @@ class ApiPendingHandler(BaseApiHandler):
                 return
 
             self.write_success()
+            return
+        except BaseApiError as bae:
+            tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
+            return
+        except Exception as e:
+            self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
+            self.write_error()
+
+    def get_pending_status_of_tasks(self):
+        """
+        Pending - get status of tasks
+        ---
+        description: Set the status of a list of pending tasks
+        requestBody:
+            description: Set the status of a list of pending tasks.
+            required: True
+            content:
+                application/json:
+                    schema:
+                        RequestTableUpdateByIdList
+        responses:
+            200:
+                description: 'Sample response: Returns a list of tasks with their status.'
+                content:
+                    application/json:
+                        schema:
+                            PendingTasksTableResultsSchema
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
+        try:
+            json_request = self.read_json_request(RequestTableUpdateByIdList())
+
+            status_results = pending_tasks.fetch_tasks_status(json_request.get('id_list', []))
+            if not status_results:
+                self.set_status(self.STATUS_ERROR_INTERNAL, reason="Failed to fetch pending tasks status")
+                self.write_error()
+                return
+
+            response = self.build_response(
+                PendingTasksSchema(),
+                {
+                    "results": status_results,
+                }
+            )
+            self.write_success(response)
+            return
+        except BaseApiError as bae:
+            tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
+            return
+        except Exception as e:
+            self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
+            self.write_error()
+
+    def set_pending_status_as_ready(self):
+        """
+        Pending - set status as ready
+        ---
+        description: Set the status of a list of created pending tasks as ready for processing
+        requestBody:
+            description: Set the status of a list of created pending tasks as ready for processing.
+            required: True
+            content:
+                application/json:
+                    schema:
+                        RequestTableUpdateByIdList
+        responses:
+            200:
+                description: 'Successful request; Returns success status'
+                content:
+                    application/json:
+                        schema:
+                            BaseSuccessSchema
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
+        try:
+            json_request = self.read_json_request(RequestTableUpdateByIdList())
+
+            if not pending_tasks.update_pending_tasks_status(json_request.get('id_list', []), status='pending'):
+                self.set_status(self.STATUS_ERROR_INTERNAL, reason="Failed to update pending tasks status")
+                self.write_error()
+                return
+
+            self.write_success()
+            return
+        except BaseApiError as bae:
+            tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
+            return
+        except Exception as e:
+            self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
+            self.write_error()
+
+    def download_pending_task_file(self, task_id=None):
+        """
+        Pending - download a pending task file
+        ---
+        description: Download the file of a pending task
+        responses:
+            200:
+                description: 'Returns the task file.'
+                content:
+                    application/octet-stream:
+                        schema:
+                            type: string
+                            format: binary
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
+        try:
+            status_results = pending_tasks.fetch_tasks_status([task_id])
+            if not status_results:
+                self.set_status(self.STATUS_ERROR_INTERNAL, reason="Failed to fetch pending tasks status")
+                self.write_error()
+                return
+
+            # Set file details
+            abspath = status_results[0].get('abspath', '')
+            basename = os.path.basename(abspath)
+
+            self.set_header('Content-Type', 'application/octet-stream')
+            self.set_header('Content-Disposition', 'attachment; filename={}'.format(basename))
+
+            with open(abspath, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b''):
+                    self.write(chunk)
+
+            return
+        except BaseApiError as bae:
+            tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
+            return
+        except Exception as e:
+            self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
+            self.write_error()
+
+    def download_pending_task_data(self, task_id=None):
+        """
+        Pending - download completed remote task data
+        ---
+        description: Returns the completed tasks data
+        responses:
+            200:
+                description: 'Returns the task file.'
+                content:
+                    application/octet-stream:
+                        schema:
+                            type: string
+                            format: binary
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
+        try:
+            status_results = pending_tasks.fetch_tasks_status([task_id])
+            if not status_results:
+                self.set_status(self.STATUS_ERROR_INTERNAL, reason="Failed to fetch pending tasks status")
+                self.write_error()
+                return
+
+            if not status_results[0].get('status') == 'complete':
+                self.set_status(self.STATUS_ERROR_INTERNAL, reason="Pending tasks status is not 'complete'")
+                self.write_error()
+                return
+
+            # Set file details
+            abspath = status_results[0].get('abspath', '')
+            basename = 'data.json'
+            data_file = os.path.join(os.path.dirname(abspath), basename)
+
+            self.set_header('Content-Type', 'application/octet-stream')
+            self.set_header('Content-Disposition', 'attachment; filename={}'.format(basename))
+
+            with open(data_file, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b''):
+                    self.write(chunk)
+
             return
         except BaseApiError as bae:
             tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))

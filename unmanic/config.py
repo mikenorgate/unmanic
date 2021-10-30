@@ -69,9 +69,11 @@ class Config(object, metaclass=SingletonType):
         self.follow_symlinks = True
         self.run_full_scan_on_start = False
         self.enable_inotify = False
+        self.clear_pending_tasks_on_restart = True
 
         # Worker settings
         self.number_of_workers = 1
+        self.worker_event_schedules = []
         self.cache_path = os.path.join('/', 'tmp', 'unmanic')
 
         # Import env variables and override all previous settings.
@@ -338,6 +340,14 @@ class Config(object, metaclass=SingletonType):
         """
         return self.library_path
 
+    def get_clear_pending_tasks_on_restart(self):
+        """
+        Get setting - clear_pending_tasks_on_restart
+
+        :return:
+        """
+        return self.clear_pending_tasks_on_restart
+
     def get_log_path(self):
         """
         Get setting - log_path
@@ -353,6 +363,14 @@ class Config(object, metaclass=SingletonType):
         :return:
         """
         return self.number_of_workers
+
+    def get_worker_event_schedules(self):
+        """
+        Get setting - worker_event_schedules
+
+        :return:
+        """
+        return self.worker_event_schedules
 
     def get_enable_library_scanner(self):
         """

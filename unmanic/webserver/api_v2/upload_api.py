@@ -36,7 +36,8 @@ import tornado.log
 import tornado.web
 
 from unmanic import config
-from unmanic.libs import session
+from unmanic.libs import common, session
+from unmanic.libs.uiserver import FrontendPushMessages
 from unmanic.webserver.api_v2.base_api_handler import BaseApiHandler, BaseApiError
 from unmanic.webserver.api_v2.schema.schemas import PendingTasksTableResultsSchema
 from unmanic.webserver.helpers import pending_tasks
@@ -52,8 +53,9 @@ SEPARATOR = b'\r\n'
 @tornado.web.stream_request_body
 class ApiUploadHandler(BaseApiHandler):
     session = None
-    config = None
     params = None
+    config = None
+    frontend_messages = None
 
     bytes_read = None
     meta = None
@@ -73,6 +75,7 @@ class ApiUploadHandler(BaseApiHandler):
         self.session = session.Session()
         self.params = kwargs.get("params")
         self.config = config.Config()
+        self.frontend_messages = FrontendPushMessages()
 
     def prepare(self):
         self.bytes_read = 0
@@ -85,7 +88,7 @@ class ApiUploadHandler(BaseApiHandler):
         # Set the output path to the cache directory
         out_folder = "unmanic_remote_pending_library-{}".format(time.time())
         if not self.cache_directory:
-            self.cache_directory = os.path.join(self.config.get_cache_path(), out_folder)
+            self.cache_directory = os.path.join(self.config.get_cache_path(), 'remote_library', out_folder)
             if not os.path.exists(self.cache_directory):
                 os.makedirs(self.cache_directory)
 
@@ -94,9 +97,11 @@ class ApiUploadHandler(BaseApiHandler):
 
     def get_receiver(self):
         index = 0
+        frontend_messages = self.frontend_messages
 
         def receiver(chunk):
             nonlocal index
+            nonlocal frontend_messages
             if index == 0:
                 index += 1
                 split_chunk = chunk.split(SEPARATOR)
@@ -105,6 +110,17 @@ class ApiUploadHandler(BaseApiHandler):
                 self.meta['header'] = SEPARATOR.join(split_chunk[0:3])
                 self.meta['header'] += SEPARATOR * 2
                 self.meta['filename'] = split_chunk[1].split(b'=')[-1].replace(b'"', b'').decode()
+
+                if frontend_messages:
+                    frontend_messages.update(
+                        {
+                            'id':      'receivingRemoteFile',
+                            'type':    'status',
+                            'code':    'receivingRemoteFile',
+                            'message': self.meta['filename'],
+                            'timeout': 0
+                        }
+                    )
 
                 chunk = chunk[len(self.meta['header']):]
                 self.fp = open(os.path.join(self.cache_directory, self.meta['filename']), "wb")
@@ -132,11 +148,11 @@ class ApiUploadHandler(BaseApiHandler):
                                 format: binary
         responses:
             200:
-                description: 'Successful request; Returns success status'
+                description: 'Successful request; Returns data for the generated task'
                 content:
                     application/json:
                         schema:
-                            BaseSuccessSchema
+                            PendingTasksTableResultsSchema
             400:
                 description: Bad request; Check `messages` for any validation errors
                 content:
@@ -167,15 +183,33 @@ class ApiUploadHandler(BaseApiHandler):
             self.meta['content_length'] = int(self.request.headers.get('Content-Length')) - \
                                           len(self.meta['header']) - \
                                           len(self.meta['boundary'])
+
+            if self.frontend_messages:
+                self.frontend_messages.update(
+                    {
+                        'id':      'receivingRemoteFile',
+                        'type':    'status',
+                        'code':    'receivingRemoteFile',
+                        'message': '',
+                        'timeout': 0
+                    }
+                )
+
             self.fp.seek(self.meta['content_length'], 0)
             self.fp.truncate()
             self.fp.close()
+
+            # Remove frontend status message
+            if self.frontend_messages:
+                self.frontend_messages.remove_item('receivingRemoteFile')
 
             # Create task entry for the file
             pathname = os.path.join(self.cache_directory, self.meta['filename'])
             task_info = pending_tasks.add_remote_tasks(pathname)
             if not task_info:
                 self.write_error()
+
+            checksum = common.get_file_checksum(task_info.get('abspath'))
 
             # Return the details of the generated task
             response = self.build_response(
@@ -186,13 +220,18 @@ class ApiUploadHandler(BaseApiHandler):
                     "priority": task_info.get('priority'),
                     "type":     task_info.get('type'),
                     "status":   task_info.get('status'),
+                    "checksum": checksum
                 }
             )
             self.write_success(response)
             return
         except BaseApiError as bae:
             tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
+            if self.frontend_messages:
+                self.frontend_messages.remove_item('receivingRemoteFile')
             return
         except Exception as e:
+            if self.frontend_messages:
+                self.frontend_messages.remove_item('receivingRemoteFile')
             self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
             self.write_error()

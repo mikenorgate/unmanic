@@ -383,6 +383,11 @@ class PendingTasksTableResultsSchema(BaseSchema):
         description="The current status of the pending task",
         example="pending",
     )
+    checksum = fields.Str(
+        required=False,
+        description="The uploaded file md5 checksum",
+        example="5425ab3df5cdbad2e1099bb4cb963a4f",
+    )
 
 
 class PendingTasksSchema(TableRecordsSuccessSchema):
@@ -405,6 +410,16 @@ class RequestPendingTasksReorderSchema(RequestTableUpdateByIdList):
         description="Position to move given list of items to ('top' or 'bottom')",
         example="top",
         validate=validate.OneOf(["top", "bottom"]),
+    )
+
+
+class TaskDownloadLinkSchema(BaseSchema):
+    """Schema for returning a download link ID"""
+
+    link_id = fields.Str(
+        required=True,
+        description="The ID used to download the file /unmanic/downloads/{link_id}",
+        example="2960645c-a4e2-4b05-8866-7bd469ee9ef8",
     )
 
 
@@ -885,6 +900,55 @@ class SettingsSystemConfigSchema(BaseSchema):
     )
 
 
+class RequestSettingsRemoteInstallationAddressValidationSchema(BaseSchema):
+    """Schema to request validation of remote installation address"""
+
+    address = fields.Str(
+        required=True,
+        description="The address of the remote installation",
+        example="192.168.1.2:8888",
+    )
+
+
+class SettingsRemoteInstallationDataSchema(BaseSchema):
+    """Schema to display the data from the remote installation"""
+
+    installation = fields.Dict(
+        required=True,
+        description="The data from the remote installation",
+        example={},
+    )
+
+
+class RequestRemoteInstallationLinkConfigSchema(BaseSchema):
+    """Schema to request a single remote installation link configuration given its UUID"""
+
+    uuid = fields.Str(
+        required=True,
+        description="The uuid of the remote installation",
+        example="7cd35429-76ab-4a29-8649-8c91236b5f8b",
+    )
+
+
+class SettingsRemoteInstallationLinkConfigSchema(BaseSchema):
+    """Schema to display the data from the remote installation"""
+
+    link_config = fields.Dict(
+        required=True,
+        description="The configuration for the remote installation link",
+        example={
+            "address":                "10.0.0.2:8888",
+            "available":              True,
+            "name":                   "API schema generated",
+            "version":                "0.1.3",
+            "last_updated":           1636166593.013826,
+            "enable_receiving_tasks": False,
+            "enable_sending_tasks":   False,
+            "enable_task_preloading": True,
+        },
+    )
+
+
 # VERSION
 # =======
 
@@ -907,4 +971,95 @@ class RequestWorkerByIdSchema(BaseSchema):
     worker_id = fields.Str(
         required=True,
         example="1",
+    )
+
+
+class WorkerStatusResultsSchema(BaseSchema):
+    """Schema for worker status results"""
+
+    id = fields.Str(
+        required=True,
+        description="",
+        example="W0",
+    )
+    name = fields.Str(
+        required=True,
+        description="",
+        example="Worker-W0",
+    )
+    idle = fields.Boolean(
+        required=True,
+        description="Flag - is worker idle",
+        example=True,
+    )
+    paused = fields.Boolean(
+        required=True,
+        description="Flag - is worker paused",
+        example=False,
+    )
+    start_time = fields.Str(
+        required=True,
+        description="The time when this worker started processing a task",
+        example="1635746377.0021548",
+        allow_none=True,
+    )
+    current_file = fields.Str(
+        required=True,
+        description="The basename of the file currently being processed",
+        example="file.mp4",
+    )
+    current_task = fields.Int(
+        required=True,
+        description="The Task ID",
+        example=1,
+        allow_none=True,
+    )
+    worker_log_tail = fields.List(
+        cls_or_instance=fields.Str,
+        required=True,
+        description="The log lines produced by the worker",
+        example=[
+            "\n\nRUNNER: \nRemux Video Files [Pass #1]\n\n",
+            "\nExecuting plugin runner... Please wait",
+            "\nRunner did not request to execute a command",
+            "\n\nNo Plugin requested to run commands for this file '/tmp/unmanic/unmanic_remote_pending_library-1635746225.3336523/file.mp4'"
+        ],
+        validate=validate.Length(min=0),
+    )
+    runners_info = fields.Dict(
+        required=True,
+        description="The status of the plugin runner currently processing the file",
+        example={
+            "video_remuxer": {
+                "plugin_id":   "video_remuxer",
+                "status":      "complete",
+                "name":        "Remux Video Files",
+                "author":      "Josh.5",
+                "version":     "0.0.5",
+                "icon":        "https://raw.githubusercontent.com/Josh5/unmanic.plugin.video_remuxer/master/icon.png",
+                "description": "Remux a video file to the configured container",
+                "success":     True
+            }
+        },
+    )
+    subprocess = fields.Dict(
+        required=True,
+        description="The status of the process currently being executed",
+        example={
+            "pid":     140408939493120,
+            "percent": "None",
+            "elapsed": "None"
+        },
+    )
+
+
+class WorkerStatusSuccessSchema(BaseSchema):
+    """Schema for returning the status of all workers"""
+
+    workers_status = fields.Nested(
+        WorkerStatusResultsSchema,
+        required=True,
+        description="Results",
+        many=True,
+        validate=validate.Length(min=0),
     )

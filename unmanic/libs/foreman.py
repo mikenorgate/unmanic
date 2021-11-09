@@ -36,7 +36,7 @@ import queue
 import time
 from datetime import datetime
 
-from unmanic.libs import common
+from unmanic.libs import common, installation_link
 from unmanic.libs.plugins import PluginsHandler
 from unmanic.libs.workers import Worker
 
@@ -49,9 +49,10 @@ class Foreman(threading.Thread):
         self.data_queues = data_queues
         self.logger = data_queues["logging"].get_logger(self.name)
         self.workers_pending_task_queue = queue.Queue(maxsize=1)
+        self.remote_workers_pending_task_queue = queue.Queue(maxsize=1)
         self.complete_queue = queue.Queue()
         self.worker_threads = {}
-        self.remove_list = []
+        self.remote_task_manager_threads = {}
         self.abort_flag = threading.Event()
         self.abort_flag.clear()
 
@@ -62,8 +63,12 @@ class Foreman(threading.Thread):
         }
         self.plugin_configuration_changed()
 
-        # Set the current time for schedular
+        # Set the current time for scheduler
         self.last_schedule_run = datetime.today().strftime('%H:%M')
+
+        self.links = installation_link.Links()
+        self.link_heartbeat_last_run = 0
+        self.available_remote_managers = {}
 
     def _log(self, message, message2=None, level="info"):
         message = common.format_message(message, message2)
@@ -77,6 +82,10 @@ class Foreman(threading.Thread):
         thread_keys = [t for t in self.worker_threads]
         for thread in thread_keys:
             self.mark_worker_thread_as_redundant(thread)
+        # Stop all remote link manager threads
+        thread_keys = [t for t in self.remote_task_manager_threads]
+        for thread in thread_keys:
+            self.mark_remote_task_manager_thread_as_redundant(thread)
 
     def get_worker_count(self):
         """Returns the worker count as an integer"""
@@ -115,6 +124,8 @@ class Foreman(threading.Thread):
         if plugin_handler.get_incompatible_enabled_plugins(frontend_messages):
             valid = False
         if not plugin_handler.within_enabled_plugin_limits(frontend_messages):
+            valid = False
+        if not self.links.within_enabled_link_limits(frontend_messages):
             valid = False
 
         # Check if plugin configuration has been modified. If it has, stop the workers.
@@ -221,6 +232,82 @@ class Foreman(threading.Thread):
                     # This thread id is greater than the max number available. We should set it as redundant
                     self.mark_worker_thread_as_redundant(thread)
 
+    def init_remote_task_manager_thread(self):
+        # Fetch the first remote worker from the list
+        assigned_installation_id = None
+        assigned_installation_info = {}
+        installation_ids = [t for t in self.available_remote_managers]
+        for installation_id in installation_ids:
+            if installation_id not in self.remote_task_manager_threads:
+                assigned_installation_info = self.available_remote_managers[installation_id]
+                assigned_installation_id = installation_id
+                del self.available_remote_managers[installation_id]
+                break
+
+        # Ensure a worker was assigned
+        if not assigned_installation_info:
+            return
+
+        # Startup a thread
+        thread = installation_link.RemoteTaskManager(assigned_installation_id,
+                                                     "RemoteTaskManager-{}".format(assigned_installation_id),
+                                                     assigned_installation_info, self.remote_workers_pending_task_queue,
+                                                     self.complete_queue)
+        thread.daemon = True
+        thread.start()
+        self.remote_task_manager_threads[assigned_installation_id] = thread
+
+    def remove_stopped_remote_task_manager_threads(self):
+        """
+        Remove any redundant link managers from our list
+        Remove any worker IDs from the remote_task_manager_threads list so they are freed up for another link manager thread
+
+        :return:
+        """
+        # Remove any redundant link managers from our list
+        thread_keys = [t for t in self.remote_task_manager_threads]
+        for thread in thread_keys:
+            if thread in self.remote_task_manager_threads:
+                if not self.remote_task_manager_threads[thread].is_alive():
+                    self._log("Removing thread '{}'".format(thread), level='debug')
+                    del self.remote_task_manager_threads[thread]
+                    continue
+
+    def update_remote_worker_availability_status(self):
+        """
+        Updates the list of available remote managers that can be started
+
+        :return:
+        """
+        available_workers = self.links.check_remote_installation_for_available_workers()
+        for installation_uuid in available_workers:
+            remote_address = available_workers[installation_uuid].get('address', '')
+            workers_in_installation = available_workers[installation_uuid].get('workers', [])
+            available_worker_count = len(workers_in_installation)
+            worker_number = 0
+            for worker_number in range(available_worker_count):
+                remote_manager_id = "{}|M{}".format(installation_uuid, worker_number)
+                if remote_manager_id in self.available_remote_managers or remote_manager_id in self.remote_task_manager_threads:
+                    # This worker is already managed by a link manager thread or is already in the list of available workers
+                    continue
+                # Add this remote worker ID to the list of available remote managers
+                self.available_remote_managers[remote_manager_id] = {
+                    'uuid':    installation_uuid,
+                    'address': remote_address,
+                }
+            # Check if this installation is configured for preloading
+            if available_workers[installation_uuid].get('enable_task_preloading'):
+                # Add an extra manager so that we can preload the remote pending task queue with one file and save
+                #   network transfer time
+                remote_manager_id = "{}|M{}".format(installation_uuid, (worker_number + 1))
+                if remote_manager_id in self.available_remote_managers or remote_manager_id in self.remote_task_manager_threads:
+                    # This worker is already managed by a link manager thread or is already in the list of available workers
+                    continue
+                self.available_remote_managers[remote_manager_id] = {
+                    'uuid':    installation_uuid,
+                    'address': remote_address,
+                }
+
     def pause_all_worker_threads(self):
         """Pause all threads"""
         result = True
@@ -250,16 +337,21 @@ class Foreman(threading.Thread):
                     return True
         return False
 
+    def check_for_idle_remote_workers(self):
+        if self.available_remote_managers:
+            return True
+        return False
+
     def postprocessor_queue_full(self):
         """
-        Check if Post-processor queue is greater than the number of workers enabled.pluginEnabledLimits
+        Check if Post-processor queue is greater than the number of workers enabled.
         If it is, return True. Else False.
 
         :return:
         """
         frontend_messages = self.data_queues.get('frontend_messages')
         limit = self.get_worker_count()
-        if len(self.task_queue.list_processed_tasks()) > limit:
+        if len(self.task_queue.list_processed_tasks()) > (int(limit) + 1):
             self._log("Postprocessor queue is over {}. Halting feeding workers until it drops.".format(limit), level='warning')
             frontend_messages.update(
                 {
@@ -329,10 +421,41 @@ class Foreman(threading.Thread):
 
     def mark_worker_thread_as_redundant(self, worker_id):
         self.worker_threads[worker_id].redundant_flag.set()
-        self.remove_list.append(worker_id)
 
-    def add_to_task_queue(self, item):
-        self.workers_pending_task_queue.put(item)
+    def mark_remote_task_manager_thread_as_redundant(self, link_manager_id):
+        self.remote_task_manager_threads[link_manager_id].redundant_flag.set()
+
+    def hand_task_to_workers(self, item, local=True):
+        if local:
+            # Place into queue for a local worker to collect
+            self.workers_pending_task_queue.put(item)
+        else:
+            # Place into queue for a remote link manager thread to collect
+            self.remote_workers_pending_task_queue.put(item)
+            # Spawn link manager thread to pickup task
+            self.init_remote_task_manager_thread()
+
+    def link_manager_tread_heartbeat(self):
+        """
+        Run a list of tasks to test the status of our Link Management threads.
+        Unlike worker threads, Link Management threads live and die for a single task.
+        If a Link Management thread is alive for more than 10 seconds without picking up a task, it will die.
+        This function will reap all dead or completed threads and clean up issues where a thread may have died
+            before running a task that was added to the pending task queue (in which case a new thread should be started)
+
+        :return:
+        """
+        # Only run heartbeat every 10 seconds
+        time_now = time.time()
+        if self.link_heartbeat_last_run > (time_now - 10):
+            return
+        # self._log("Running remote link manager heartbeat", level='debug')
+        # Clear out dead threads
+        self.remove_stopped_remote_task_manager_threads()
+        # Check for updates to the worker availability status of linked remote installations
+        self.update_remote_worker_availability_status()
+        # Mark this as the last time run
+        self.link_heartbeat_last_run = time_now
 
     def run(self):
         self._log("Starting Foreman Monitor loop")
@@ -367,14 +490,24 @@ class Foreman(threading.Thread):
 
                 if not self.abort_flag.is_set() and not self.task_queue.task_list_pending_is_empty():
 
-                    # Check if there are any free workers
-                    if not self.check_for_idle_workers():
-                        # All workers are currently busy
-                        time.sleep(1)
-                        continue
+                    # Check the status of all link manager threads (close dead ones)
+                    self.link_manager_tread_heartbeat()
 
                     # Check if we are able to start up a worker for another encoding job
-                    if self.workers_pending_task_queue.full():
+                    # These queues holds only one task at a time and is used to hand tasks to the workers
+                    if self.workers_pending_task_queue.full() or self.remote_workers_pending_task_queue.full():
+                        continue
+
+                    # Check if there are any free workers
+                    if self.check_for_idle_workers():
+                        process_local = True
+                        get_local_pending_tasks_only = False
+                    elif self.check_for_idle_remote_workers():
+                        process_local = False
+                        get_local_pending_tasks_only = True
+                    else:
+                        # All workers are currently busy
+                        time.sleep(1)
                         continue
 
                     # Check if postprocessor task queue is full
@@ -382,13 +515,13 @@ class Foreman(threading.Thread):
                         time.sleep(3)
                         continue
 
-                    next_item_to_process = self.task_queue.get_next_pending_tasks()
+                    next_item_to_process = self.task_queue.get_next_pending_tasks(get_local_pending_tasks_only)
                     if next_item_to_process:
                         try:
                             self._log("Processing item - {}".format(next_item_to_process.get_source_abspath()))
                         except Exception as e:
                             self._log("Exception in fetching task absolute path", message2=str(e), level="exception")
-                        self.add_to_task_queue(next_item_to_process)
+                        self.hand_task_to_workers(next_item_to_process, local=process_local)
         except Exception as e:
             self.stop()
             raise Exception(e)

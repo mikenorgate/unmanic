@@ -254,6 +254,10 @@ components:
           description: The current status of the pending task
           example: pending
           type: string
+        checksum:
+          description: The uploaded file md5 checksum
+          example: 5425ab3df5cdbad2e1099bb4cb963a4f
+          type: string
       required:
       - abspath
       - id
@@ -797,6 +801,15 @@ components:
           example: desc
           type: string
       type: object
+    RequestRemoteInstallationLinkConfig:
+      properties:
+        uuid:
+          description: The uuid of the remote installation
+          example: 7cd35429-76ab-4a29-8649-8c91236b5f8b
+          type: string
+      required:
+      - uuid
+      type: object
     RequestSavingPluginsFlowByPluginType:
       properties:
         plugin_type:
@@ -811,6 +824,15 @@ components:
       required:
       - plugin_flow
       - plugin_type
+      type: object
+    RequestSettingsRemoteInstallationAddressValidation:
+      properties:
+        address:
+          description: The address of the remote installation
+          example: 192.168.1.2:8888
+          type: string
+      required:
+      - address
       type: object
     RequestTableUpdateByIdList:
       properties:
@@ -901,6 +923,32 @@ components:
       required:
       - settings
       type: object
+    SettingsRemoteInstallationData:
+      properties:
+        installation:
+          description: The data from the remote installation
+          example: {}
+          type: object
+      required:
+      - installation
+      type: object
+    SettingsRemoteInstallationLinkConfig:
+      properties:
+        link_config:
+          description: The configuration for the remote installation link
+          example:
+            address: 10.0.0.2:8888
+            available: true
+            enable_receiving_tasks: false
+            enable_sending_tasks: false
+            enable_task_preloading: true
+            last_updated: 1636166593.013826
+            name: API schema generated
+            version: 0.1.3
+          type: object
+      required:
+      - link_config
+      type: object
     SettingsSystemConfig:
       properties:
         configuration:
@@ -910,6 +958,15 @@ components:
       required:
       - configuration
       type: object
+    TaskDownloadLink:
+      properties:
+        link_id:
+          description: The ID used to download the file /unmanic/downloads/{link_id}
+          example: 2960645c-a4e2-4b05-8866-7bd469ee9ef8
+          type: string
+      required:
+      - link_id
+      type: object
     VersionReadSuccess:
       properties:
         version:
@@ -918,6 +975,99 @@ components:
           type: string
       required:
       - version
+      type: object
+    WorkerStatusResults:
+      properties:
+        id:
+          description: ''
+          example: W0
+          type: string
+        name:
+          description: ''
+          example: Worker-W0
+          type: string
+        idle:
+          description: Flag - is worker idle
+          example: true
+          type: boolean
+        paused:
+          description: Flag - is worker paused
+          example: false
+          type: boolean
+        start_time:
+          description: The time when this worker started processing a task
+          example: '1635746377.0021548'
+          nullable: true
+          type: string
+        current_file:
+          description: The basename of the file currently being processed
+          example: file.mp4
+          type: string
+        current_task:
+          description: The Task ID
+          example: 1
+          nullable: true
+          type: integer
+        worker_log_tail:
+          description: The log lines produced by the worker
+          example:
+          - "\n\nRUNNER: \nRemux Video Files [Pass #1]\n\n"
+          - '
+
+            Executing plugin runner... Please wait'
+          - '
+
+            Runner did not request to execute a command'
+          - '
+
+
+            No Plugin requested to run commands for this file ''/tmp/unmanic/unmanic_remote_pending_library-1635746225.3336523/file.mp4'''
+          items:
+            type: string
+          minItems: 0
+          type: array
+        runners_info:
+          description: The status of the plugin runner currently processing the file
+          example:
+            video_remuxer:
+              author: Josh.5
+              description: Remux a video file to the configured container
+              icon: https://raw.githubusercontent.com/Josh5/unmanic.plugin.video_remuxer/master/icon.png
+              name: Remux Video Files
+              plugin_id: video_remuxer
+              status: complete
+              success: true
+              version: 0.0.5
+          type: object
+        subprocess:
+          description: The status of the process currently being executed
+          example:
+            elapsed: None
+            percent: None
+            pid: 140408939493120
+          type: object
+      required:
+      - current_file
+      - current_task
+      - id
+      - idle
+      - name
+      - paused
+      - runners_info
+      - start_time
+      - subprocess
+      - worker_log_tail
+      type: object
+    WorkerStatusSuccess:
+      properties:
+        workers_status:
+          description: Results
+          items:
+            $ref: '#/components/schemas/WorkerStatusResults'
+          minItems: 0
+          type: array
+      required:
+      - workers_status
       type: object
   securitySchemes:
     BasicAuth:
@@ -1411,15 +1561,14 @@ paths:
           description: Internal error; Check `error` for exception
   /pending/download/file/id/{task_id}:
     get:
-      description: Download the file of a pending task
+      description: Request a link for downloading a task file
       responses:
         '200':
           content:
-            application/octet-stream:
+            application/json:
               schema:
-                format: binary
-                type: string
-          description: Returns the task file.
+                $ref: '#/components/schemas/TaskDownloadLink'
+          description: Successful request; Returns download link ID
         '400':
           content:
             application/json:
@@ -1446,15 +1595,14 @@ paths:
           description: Internal error; Check `error` for exception
   /pending/download/data/id/{task_id}:
     get:
-      description: Returns the completed tasks data
+      description: Request a link for downloading a task data
       responses:
         '200':
           content:
-            application/octet-stream:
+            application/json:
               schema:
-                format: binary
-                type: string
-          description: Returns the task file.
+                $ref: '#/components/schemas/TaskDownloadLink'
+          description: Successful request; Returns download link ID
         '400':
           content:
             application/json:
@@ -2281,6 +2429,129 @@ paths:
               schema:
                 $ref: '#/components/schemas/InternalError'
           description: Internal error; Check `error` for exception
+  /settings/link/validate:
+    post:
+      description: Validate a remote installation address
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestSettingsRemoteInstallationAddressValidation'
+        description: The details of the remote installation to validate
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsRemoteInstallationData'
+          description: 'Sample response: Returns the remote installation data.'
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+          description: Bad request; Check `messages` for any validation errors
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEndpoint'
+          description: Bad request; Requested endpoint not found
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadMethod'
+          description: Bad request; Requested method is not allowed
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+          description: Internal error; Check `error` for exception
+  /settings/link/read:
+    post:
+      description: Read the configuration of a remote installation link
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestRemoteInstallationLinkConfig'
+        description: The UUID of the remote installation
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsRemoteInstallationLinkConfig'
+          description: 'Sample response: Returns the remote installation link configuration.'
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+          description: Bad request; Check `messages` for any validation errors
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEndpoint'
+          description: Bad request; Requested endpoint not found
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadMethod'
+          description: Bad request; Requested method is not allowed
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+          description: Internal error; Check `error` for exception
+  /settings/link/write:
+    post:
+      description: Write the configuration of a remote installation link
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettingsRemoteInstallationLinkConfig'
+        description: The UUID of the remote installation and its configuration
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseSuccess'
+          description: Successful request; Returns success status
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+          description: Bad request; Check `messages` for any validation errors
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEndpoint'
+          description: Bad request; Requested endpoint not found
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadMethod'
+          description: Bad request; Requested method is not allowed
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+          description: Internal error; Check `error` for exception
   /upload/pending/file:
     post:
       description: Returns a list of pending tasks.
@@ -2300,8 +2571,8 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BaseSuccess'
-          description: Successful request; Returns success status
+                $ref: '#/components/schemas/PendingTasksTableResults'
+          description: Successful request; Returns data for the generated task
         '400':
           content:
             application/json:
@@ -2527,6 +2798,40 @@ paths:
               schema:
                 $ref: '#/components/schemas/BaseSuccess'
           description: Successful request; Returns success status
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+          description: Bad request; Check `messages` for any validation errors
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEndpoint'
+          description: Bad request; Requested endpoint not found
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadMethod'
+          description: Bad request; Requested method is not allowed
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+          description: Internal error; Check `error` for exception
+  /workers/status:
+    get:
+      description: Returns the status of all workers.
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerStatusSuccess'
+          description: 'Sample response: Returns the status of all workers.'
         '400':
           content:
             application/json:

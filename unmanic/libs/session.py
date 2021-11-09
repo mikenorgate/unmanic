@@ -209,6 +209,8 @@ class Session(object, metaclass=SingletonType):
         :param force:
         :return:
         """
+        return True
+
         # First check if the current session is still valid
         if not force and self.__check_session_valid():
             return True

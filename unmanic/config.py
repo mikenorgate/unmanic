@@ -67,6 +67,7 @@ class Config(object, metaclass=SingletonType):
         self.enable_library_scanner = False
         self.schedule_full_scan_minutes = 1440
         self.follow_symlinks = True
+        self.concurrent_file_testers = 2
         self.run_full_scan_on_start = False
         self.enable_inotify = False
         self.clear_pending_tasks_on_restart = True
@@ -79,6 +80,7 @@ class Config(object, metaclass=SingletonType):
         # Link settings
         self.installation_name = ''
         self.remote_installations = []
+        self.distributed_worker_count_target = 0
 
         # Import env variables and override all previous settings.
         self.__import_settings_from_env()
@@ -408,6 +410,14 @@ class Config(object, metaclass=SingletonType):
         """
         return self.follow_symlinks
 
+    def get_concurrent_file_testers(self):
+        """
+        Get setting - concurrent_file_testers
+
+        :return:
+        """
+        return self.concurrent_file_testers
+
     def get_plugins_path(self):
         """
         Get setting - config_path
@@ -438,4 +448,16 @@ class Config(object, metaclass=SingletonType):
 
         :return:
         """
-        return self.remote_installations
+        remote_installations = []
+        for ri in self.remote_installations:
+            ri['distributed_worker_count_target'] = self.distributed_worker_count_target
+            remote_installations.append(ri)
+        return remote_installations
+
+    def get_distributed_worker_count_target(self):
+        """
+        Get setting - distributed_worker_count_target
+
+        :return:
+        """
+        return self.distributed_worker_count_target

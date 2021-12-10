@@ -93,12 +93,15 @@ class FileTest(object):
         """
         # Fetch historical tasks
         history_logging = history.History()
-        task_results = history_logging.get_historic_tasks_list_with_source_probe(abspath=self.path, task_success=True)
-        if not task_results:
-            # No results were found matching that pathname
-            return False
-        return True
-        # That pathname was found in the results of succeeded historic tasks
+        success_paths = []
+        success_tasks = history_logging.get_historic_tasks_list_with_source_probe(task_success=True)
+        for task in success_tasks:
+            success_paths.append(task.get('abspath'))
+        if path in success_paths:
+            # That pathname was found in the results of failed historic tasks
+            return True
+        # No results were found matching that pathname
+        return False
 
     def file_in_unmanic_ignore_lockfile(self, path):
         """

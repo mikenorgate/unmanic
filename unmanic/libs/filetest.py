@@ -85,7 +85,7 @@ class FileTest(object):
         # No results were found matching that pathname
         return False
 
-    def file_success_in_history(self):
+    def file_success_in_history(self, path):
         """
         Check if file has already succeeded in history
 
@@ -130,11 +130,15 @@ class FileTest(object):
         :return:
         """
         return_value = None
-        # Check if file has succeeded in history.
-        if self.file_success_in_history():
-            return False
-
         file_issues = []
+
+        # Check if file has succeeded in history.
+        if self.file_success_in_history(path):
+            file_issues.append({
+                'id':      'blacklisted',
+                'message': "File already completed - '{}'".format(path),
+            })
+            return False, file_issues        
 
         # TODO: Remove this
         if self.file_in_unmanic_ignore_lockfile(path):

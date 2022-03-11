@@ -56,18 +56,17 @@ def prepare_filtered_plugins(params):
         })
     ]
 
-    enabled = params.get('enabled')
-
     # Fetch Plugins
     plugins = PluginsHandler()
+    plugin_executor = PluginExecutor()
     # Get total count
     records_total_count = plugins.get_total_plugin_list_count()
     # Get quantity after filters (without pagination)
     records_filtered_count = plugins.get_plugin_list_filtered_and_sorted(order=order, start=0, length=0,
-                                                                         search_value=search_value, enabled=enabled).count()
+                                                                         search_value=search_value).count()
     # Get filtered/sorted results
     plugin_results = plugins.get_plugin_list_filtered_and_sorted(order=order, start=start, length=length,
-                                                                 search_value=search_value, enabled=enabled)
+                                                                 search_value=search_value)
 
     # Build return data
     return_data = {
@@ -80,9 +79,13 @@ def prepare_filtered_plugins(params):
     for plugin_result in plugin_results:
         # Set plugin status
         plugin_status = {
-            "enabled":          plugin_result.get('enabled'),
             "update_available": plugin_result.get('update_available'),
         }
+        # Check if plugin is able to be configured
+        has_config = False
+        plugin_settings, plugin_settings_meta = plugin_executor.get_plugin_settings(plugin_result.get('plugin_id'))
+        if plugin_settings:
+            has_config = True
         # Set params as required in template
         item = {
             'id':          plugin_result.get('id'),
@@ -94,6 +97,7 @@ def prepare_filtered_plugins(params):
             'author':      plugin_result.get('author'),
             'version':     plugin_result.get('version'),
             'status':      plugin_status,
+            'has_config':  has_config,
         }
         return_data["results"].append(item)
 
@@ -117,9 +121,16 @@ def get_plugin_types_with_flows():
     return return_plugin_types
 
 
-def get_enabled_plugin_flows_for_plugin_type(plugin_type):
+def get_enabled_plugin_flows_for_plugin_type(plugin_type, library_id):
+    """
+    Fetch all enabled plugin flows for a plugin type
+
+    :param plugin_type:
+    :param library_id:
+    :return:
+    """
     plugin_handler = PluginsHandler()
-    plugin_modules = plugin_handler.get_enabled_plugin_modules_by_type(plugin_type)
+    plugin_modules = plugin_handler.get_enabled_plugin_modules_by_type(plugin_type, library_id=library_id)
 
     # Only return the data that we need
     return_plugin_flow = []
@@ -153,32 +164,17 @@ def exec_plugin_runner(data, plugin_id):
     return plugin_handler.exec_plugin_runner(data, plugin_id, 'frontend.panel')
 
 
-def save_enabled_plugin_flows_for_plugin_type(plugin_type, plugin_flow):
+def save_enabled_plugin_flows_for_plugin_type(plugin_type, library_id, plugin_flow):
+    """
+    Save a plugin flow given the plugin type and library ID
+
+    :param plugin_type:
+    :param library_id:
+    :param plugin_flow:
+    :return:
+    """
     plugins = PluginsHandler()
-    return plugins.set_plugin_flow(plugin_type, plugin_flow)
-
-
-def enable_plugins(plugin_table_ids, frontend_messages=None):
-    """
-    Enables a list of plugins
-
-    :param frontend_messages:
-    :param plugin_table_ids:
-    :return:
-    """
-    plugins_handler = PluginsHandler()
-    return plugins_handler.enable_plugin_by_db_table_id(plugin_table_ids, frontend_messages)
-
-
-def disable_plugins(plugin_table_ids):
-    """
-    Disables a list of plugins
-
-    :param plugin_table_ids:
-    :return:
-    """
-    plugins_handler = PluginsHandler()
-    return plugins_handler.disable_plugin_by_db_table_id(plugin_table_ids)
+    return plugins.set_plugin_flow(plugin_type, library_id, plugin_flow)
 
 
 def remove_plugins(plugin_table_ids):
@@ -203,18 +199,19 @@ def update_plugins(plugin_table_ids):
     return plugins_handler.update_plugins_by_db_table_id(plugin_table_ids)
 
 
-def get_plugin_settings(plugin_id):
+def get_plugin_settings(plugin_id: str, library_id=None):
     """
     Given a plugin installation ID, return a list of plugin settings for that plugin
 
     :param plugin_id:
+    :param library_id:
     :return:
     """
     settings = []
 
     # Check plugin for settings
     plugin_executor = PluginExecutor()
-    plugin_settings, plugin_settings_meta = plugin_executor.get_plugin_settings(plugin_id)
+    plugin_settings, plugin_settings_meta = plugin_executor.get_plugin_settings(plugin_id, library_id=library_id)
     if plugin_settings:
         for key in plugin_settings:
             form_input = {
@@ -306,12 +303,13 @@ def get_plugin_long_description(plugin_id):
     return plugin_executor.get_plugin_long_description(plugin_id)
 
 
-def prepare_plugin_info_and_settings(plugin_id, prefer_local=True):
+def prepare_plugin_info_and_settings(plugin_id, prefer_local=True, library_id=None):
     """
     Returns a object of plugin metadata and current settings for the requested plugin_id
 
     :param prefer_local:
     :param plugin_id:
+    :param library_id:
     :return:
     """
     plugins_handler = PluginsHandler()
@@ -340,7 +338,6 @@ def prepare_plugin_info_and_settings(plugin_id, prefer_local=True):
         # Set plugin status
         plugin_status = {
             "installed":        plugin_result.get('installed', False),
-            "enabled":          plugin_result.get('enabled', False),
             "update_available": plugin_result.get('update_available', False),
         }
         # Set params as required in template
@@ -358,7 +355,7 @@ def prepare_plugin_info_and_settings(plugin_id, prefer_local=True):
             'settings':    [],
         }
         if plugin_installed:
-            plugin_data['settings'] = get_plugin_settings(plugin_result.get('plugin_id'))
+            plugin_data['settings'] = get_plugin_settings(plugin_result.get('plugin_id'), library_id=library_id)
             plugin_data['changelog'] = "".join(get_plugin_changelog(plugin_result.get('plugin_id')))
             plugin_data['description'] += "\n" + "".join(
                 get_plugin_long_description(plugin_result.get('plugin_id')))
@@ -366,10 +363,35 @@ def prepare_plugin_info_and_settings(plugin_id, prefer_local=True):
 
     return plugin_data
 
+def check_if_plugin_is_installed(plugin_id):
+    """
+    Returns true if the given plugin is installed
 
-def update_plugin_settings(plugin_id, settings):
+    :param plugin_id:
+    :return:
+    """
+    plugins_handler = PluginsHandler()
+
+    plugin_installed = True
+    plugin_results = plugins_handler.get_plugin_list_filtered_and_sorted(plugin_id=plugin_id)
+
+    if not plugin_results:
+        # This plugin is not installed
+        plugin_installed = False
+
+    return plugin_installed
+
+def update_plugin_settings(plugin_id, settings, library_id=None):
+    """
+    Updates the settings for the requested plugin_id
+
+    :param plugin_id:
+    :param settings:
+    :param library_id:
+    :return:
+    """
     # Fetch plugin info (and settings if any)
-    plugin_data = prepare_plugin_info_and_settings(plugin_id)
+    plugin_data = prepare_plugin_info_and_settings(plugin_id, library_id=library_id)
 
     # If no plugin data was found for the posted plugin table ID, then return a failure response
     if not plugin_data:
@@ -395,13 +417,35 @@ def update_plugin_settings(plugin_id, settings):
     # If we found settings that need to be saved, save them...
     if settings_to_save:
         plugin_executor = PluginExecutor()
-        saved_all_settings = plugin_executor.save_plugin_settings(plugin_data.get('plugin_id'), settings_to_save)
+        saved_all_settings = plugin_executor.save_plugin_settings(plugin_data.get('plugin_id'),
+                                                                  settings_to_save,
+                                                                  library_id=library_id)
         # If the save function was successful
         if saved_all_settings:
             # Update settings in plugin data that will be returned
             return True
 
     return False
+
+
+def reset_plugin_settings(plugin_id, library_id=None):
+    """
+    Reset a plugin's settings back to defaults (or global config if a library ID is provided)
+
+    :param plugin_id:
+    :param library_id:
+    :return:
+    """
+    # Fetch plugin info (and settings if any)
+    plugin_data = prepare_plugin_info_and_settings(plugin_id, library_id=library_id)
+
+    # If no plugin data was found for the posted plugin table ID, then return a failure response
+    if not plugin_data:
+        return False
+
+    # Reset the plugin settings
+    plugin_executor = PluginExecutor()
+    return plugin_executor.reset_plugin_settings(plugin_data.get('plugin_id'), library_id=library_id)
 
 
 def prepare_installable_plugins_list():

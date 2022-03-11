@@ -343,6 +343,16 @@ class CompletedTasksLogSchema(BaseSchema):
     )
 
 
+class RequestAddCompletedToPendingTasksSchema(RequestTableUpdateByIdList):
+    """Schema for adding a completed task to the pending task queue"""
+
+    library_id = fields.Int(
+        required=False,
+        load_default=0,
+        example=1,
+    )
+
+
 # PENDING
 # =======
 
@@ -388,6 +398,16 @@ class PendingTasksTableResultsSchema(BaseSchema):
         description="The uploaded file md5 checksum",
         example="5425ab3df5cdbad2e1099bb4cb963a4f",
     )
+    library_id = fields.Int(
+        required=False,
+        description="The ID of the library for which this task was created",
+        example=1,
+    )
+    library_name = fields.Str(
+        required=False,
+        description="The name of the library for which this task was created",
+        example="Default",
+    )
 
 
 class PendingTasksSchema(TableRecordsSuccessSchema):
@@ -413,6 +433,23 @@ class RequestPendingTasksReorderSchema(RequestTableUpdateByIdList):
     )
 
 
+class RequestPendingTaskCreateSchema(BaseSchema):
+    """Schema for requesting the creation of a pending task"""
+
+    path = fields.Str(
+        required=True,
+        example="/library/TEST_FILE.mkv",
+    )
+    library_id = fields.Int(
+        required=False,
+        example=1,
+    )
+    library_name = fields.Str(
+        required=False,
+        example='Default',
+    )
+
+
 class TaskDownloadLinkSchema(BaseSchema):
     """Schema for returning a download link ID"""
 
@@ -420,6 +457,15 @@ class TaskDownloadLinkSchema(BaseSchema):
         required=True,
         description="The ID used to download the file /unmanic/downloads/{link_id}",
         example="2960645c-a4e2-4b05-8866-7bd469ee9ef8",
+    )
+
+
+class RequestPendingTasksLibraryUpdateSchema(RequestTableUpdateByIdList):
+    """Schema for updating the library for a list of created tasks"""
+
+    library_name = fields.Str(
+        required=True,
+        example='Default',
     )
 
 
@@ -439,11 +485,6 @@ class PluginStatusSchema(BaseSchema):
     installed = fields.Boolean(
         required=False,
         description="Is the plugin installed",
-        example=True,
-    )
-    enabled = fields.Boolean(
-        required=False,
-        description="Is the plugin enabled",
         example=True,
     )
     update_available = fields.Boolean(
@@ -515,6 +556,11 @@ class PluginsMetadataResultsSchema(BaseSchema):
         description="The plugin changelog",
         example="[b][color=56adda]0.0.1[/color][/b]• initial version",
     )
+    has_config = fields.Boolean(
+        required=False,
+        description="The plugin has the ability to be configured",
+        example=True,
+    )
 
 
 class PluginsTableResultsSchema(PluginsMetadataResultsSchema):
@@ -546,6 +592,11 @@ class RequestPluginsInfoSchema(RequestPluginsByIdSchema):
         required=False,
         load_default=True,
         example=True,
+    )
+    library_id = fields.Int(
+        required=False,
+        load_default=0,
+        example=1,
     )
 
 
@@ -632,6 +683,25 @@ class RequestPluginsSettingsSaveSchema(BaseSchema):
         many=True,
         description="The plugin settings",
     )
+    library_id = fields.Int(
+        required=False,
+        load_default=0,
+        example=1,
+    )
+
+
+class RequestPluginsSettingsResetSchema(BaseSchema):
+    """Schema for requesting the reset of a plugins settings by the plugin install ID"""
+
+    plugin_id = fields.Str(
+        required=True,
+        example="encoder_video_hevc_vaapi",
+    )
+    library_id = fields.Int(
+        required=False,
+        load_default=0,
+        example=1,
+    )
 
 
 class PluginsMetadataInstallableResultsSchema(PluginsMetadataResultsSchema):
@@ -694,6 +764,11 @@ class RequestPluginsFlowByPluginTypeSchema(BaseSchema):
         required=True,
         example="library_management.file_test",
     )
+    library_id = fields.Int(
+        required=False,
+        load_default=1,
+        example=1,
+    )
 
 
 class PluginFlowDataResultsSchema(BaseSchema):
@@ -752,6 +827,11 @@ class RequestSavingPluginsFlowByPluginTypeSchema(RequestPluginsFlowByPluginTypeS
         description="Saved flow",
         many=True,
         validate=validate.Length(min=1),
+    )
+    library_id = fields.Int(
+        required=False,
+        load_default=1,
+        example=1,
     )
 
 
@@ -873,7 +953,6 @@ class SettingsReadAndWriteSchema(BaseSchema):
             "schedule_full_scan_minutes": 1440,
             "follow_symlinks":            True,
             "run_full_scan_on_start":     False,
-            "enable_inotify":             False,
             "number_of_workers":          1,
             "worker_event_schedules":     [
                 {
@@ -952,6 +1031,150 @@ class SettingsRemoteInstallationLinkConfigSchema(BaseSchema):
         required=False,
         description="The target count of workers to be distributed across any configured linked installations",
         example=4,
+    )
+
+
+class LibraryResultsSchema(BaseSchema):
+    """Schema for library results"""
+
+    id = fields.Int(
+        required=True,
+        description="",
+        example=1,
+    )
+    name = fields.Str(
+        required=True,
+        description="The name of the library",
+        example="Default",
+    )
+    path = fields.Str(
+        required=True,
+        description="The library path",
+        example="/library",
+    )
+    locked = fields.Boolean(
+        required=True,
+        description="If the library is locked and cannot be deleted",
+        example=False,
+    )
+
+
+class SettingsLibrariesListSchema(BaseSchema):
+    """Schema to list all libraries"""
+
+    libraries = fields.Nested(
+        LibraryResultsSchema,
+        required=True,
+        description="Results",
+        many=True,
+        validate=validate.Length(min=1),
+    )
+
+
+class RequestLibraryByIdSchema(BaseSchema):
+    """Schema to request a single library given its ID"""
+
+    id = fields.Int(
+        required=True,
+        description="The ID of the library",
+        example=1,
+    )
+
+
+class SettingsLibraryConfigReadAndWriteSchema(BaseSchema):
+    """Schema to display the data from the remote installation"""
+
+    library_config = fields.Dict(
+        required=True,
+        description="The library configuration",
+        example={
+            "id":             1,
+            "name":           "Default",
+            "path":           "/library",
+            "enable_scanner": False,
+            "enable_inotify": False,
+        },
+    )
+
+    plugins = fields.Dict(
+        required=False,
+        description="The library's enabled plugins",
+        example={
+            "enabled_plugins": [
+                {
+                    "library_id":  1,
+                    "plugin_id":   "notify_plex",
+                    "name":        "Notify Plex",
+                    "description": "Notify Plex on completion of a task.",
+                    "icon":        "https://raw.githubusercontent.com/Josh5/unmanic.plugin.notify_plex/master/icon.png"
+                }
+            ]
+        },
+    )
+
+
+class SettingsLibraryPluginConfigExportSchema(BaseSchema):
+    """Schema for exporting a library's plugin config"""
+
+    plugins = fields.Dict(
+        required=True,
+        description="The library's enabled plugins",
+        example={
+            "enabled_plugins": [
+                {
+                    "library_id":  1,
+                    "plugin_id":   "encoder_audio_ac3",
+                    "name":        "Audio Encoder AC3",
+                    "description": "Ensure all audio streams are encoded with the AC3 codec using the native FFmpeg ac3 encoder.",
+                    "icon":        "https://raw.githubusercontent.com/Josh5/unmanic.plugin.encoder_audio_ac3/master/icon.png"
+                }
+            ],
+            "plugin_flow":     {
+                "library_management.file_test": [
+                    {
+                        "plugin_id":   "encoder_audio_ac3",
+                        "name":        "Audio Encoder AC3",
+                        "author":      "Josh.5",
+                        "description": "Ensure all audio streams are encoded with the AC3 codec using the native FFmpeg ac3 encoder.",
+                        "version":     "0.0.2",
+                        "icon":        "https://raw.githubusercontent.com/Josh5/unmanic.plugin.encoder_audio_ac3/master/icon.png"
+                    }
+                ],
+                "worker.process_item":          [
+                    {
+                        "plugin_id":   "encoder_audio_ac3",
+                        "name":        "Audio Encoder AC3",
+                        "author":      "Josh.5",
+                        "description": "Ensure all audio streams are encoded with the AC3 codec using the native FFmpeg ac3 encoder.",
+                        "version":     "0.0.2",
+                        "icon":        "https://raw.githubusercontent.com/Josh5/unmanic.plugin.encoder_audio_ac3/master/icon.png"
+                    }
+                ],
+                "postprocessor.file_move":      [],
+                "postprocessor.task_result":    []
+            }
+        },
+    )
+
+    library_config = fields.Dict(
+        required=False,
+        description="The library configuration",
+        example={
+            "id":             1,
+            "name":           "Default",
+            "path":           "/library",
+            "enable_scanner": False,
+            "enable_inotify": False,
+        },
+    )
+
+
+class SettingsLibraryPluginConfigImportSchema(SettingsLibraryPluginConfigExportSchema):
+    """Schema for import a library's plugin config"""
+
+    library_id = fields.Int(
+        required=True,
+        example=1,
     )
 
 

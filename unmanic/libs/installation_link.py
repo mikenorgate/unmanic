@@ -40,6 +40,7 @@ from requests_toolbelt import MultipartEncoder
 
 from unmanic import config
 from unmanic.libs import common, session, task, unlogger
+from unmanic.libs.library import Library
 from unmanic.libs.session import Session
 from unmanic.libs.singleton import SingletonType
 
@@ -91,28 +92,37 @@ class Links(object, metaclass=SingletonType):
         }
 
     def acquire_network_transfer_lock(self, url):
+        """
+        Limit transfers to each installation to 1 at a time
+
+        :param url:
+        :return:
+        """
         time_now = time.time()
         lock = threading.RLock()
         with lock:
-            if self._network_transfer_lock.get('expires', 0) < time_now:
-                # Create new upload lock that will expire in 2 minutes
-                self._network_transfer_lock['expires'] = (time.time() + 120)
-                self._network_transfer_lock['url'] = url
+            if self._network_transfer_lock.get(url, {}).get('expires', 0) < time_now:
+                # Create new upload lock that will expire in 1 minute
+                self._network_transfer_lock[url] = {
+                    'expires': (time_now + 60),
+                }
                 # Return success
                 return True
-        # Failed to acquire network transfer lock
-        return False
+            # Failed to acquire network transfer lock
+            return False
 
     def release_network_transfer_lock(self, url):
+        """
+        Expire the transfer lock for the given URL
+
+        :param url:
+        :return:
+        """
         lock = threading.RLock()
         with lock:
-            if self._network_transfer_lock.get('url') == url:
-                # Expire the lock
-                self._network_transfer_lock = {}
-                # Return success
-                return True
-        # Failed to release network transfer lock - perhaps the url is incorrect
-        return False
+            # Expire the lock for this address
+            self._network_transfer_lock[url] = {}
+            return True
 
     def remote_api_get(self, remote_url: str, endpoint: str):
         """
@@ -159,12 +169,13 @@ class Links(object, metaclass=SingletonType):
         address = self.__format_address(remote_url)
         url = "{}{}".format(address, endpoint)
         # NOTE: If you remove a content type from the upload (text/plain) the file upload fails
-        # NOTE2: This method reads the file into memory before uploading. This is slow and
-        #   not ideal for devices with small amounts of ram.
-        # with open(path, "rb") as f:
-        #     # Note: If you remove a content type from this (text/plain) the file upload fails
-        #     files = {"fileName": (os.path.basename(path), f, 'text/plain')}
-        #     res = requests.post(url, files=files)
+        # NOTE2: The 'ith open(path, "rb") as f' method reads the file into memory before uploading.
+        #   This is slow and not ideal for devices with small amounts of ram.
+        #   ```
+        #       with open(path, "rb") as f:
+        #           files = {"fileName": (os.path.basename(path), f, 'text/plain')}
+        #           res = requests.post(url, files=files)
+        #   ```
         m = MultipartEncoder(fields={'fileName': (os.path.basename(path), open(path, 'rb'), 'text/plain')})
         res = requests.post(url, data=m, headers={'Content-Type': m.content_type})
         if res.status_code == 200:
@@ -478,7 +489,7 @@ class Links(object, metaclass=SingletonType):
 
         :return:
         """
-        available_workers = {}
+        installations_with_info = {}
         for local_config in self.settings.get_remote_installations():
 
             # Only installations that are available
@@ -494,43 +505,66 @@ class Links(object, metaclass=SingletonType):
                 continue
 
             try:
+                # Only installations that have at least one idle worker that is not paused
+                results = self.remote_api_get(local_config.get('address'), '/unmanic/api/v2/workers/status')
+                worker_list = results.get('workers_status', [])
 
-                # Only installations that have not pending tasks
+                # Only add installations that have not got pending tasks. This is unless we are configured to preload the queue
                 max_pending_tasks = 0
                 if local_config.get('enable_task_preloading'):
-                    max_pending_tasks = 1
+                    # Preload with the number of workers (regardless of the worker status) plus an additional one to account
+                    # for delays in the downloads
+                    max_pending_tasks = len(worker_list) + 1
                 results = self.remote_api_post(local_config.get('address'), '/unmanic/api/v2/pending/tasks', {
                     "start":  0,
                     "length": 1
                 })
-                if int(results.get('recordsFiltered', 0)) > max_pending_tasks:
+                current_pending_tasks = int(results.get('recordsFiltered', 0))
+                if current_pending_tasks >= max_pending_tasks:
+                    self._log("Remote installation has exceeded the max remote pending task count ({})".format(
+                        current_pending_tasks), level='debug')
                     continue
 
-                # Only installations that have at least one idle worker that is not paused
-                results = self.remote_api_get(local_config.get('address'), '/unmanic/api/v2/workers/status')
-                for worker in results.get('workers_status', []):
+                # Fetch remote installation library name list
+                results = self.remote_api_get(local_config.get('address'), '/unmanic/api/v2/settings/libraries')
+                library_names = []
+                for library in results.get('libraries', []):
+                    library_names.append(library.get('name'))
+
+                # Ensure that worker count is more than 0
+                if len(worker_list):
+                    installations_with_info[local_config.get('uuid')] = {
+                        "address":                local_config.get('address'),
+                        "enable_task_preloading": local_config.get('enable_task_preloading'),
+                        "library_names":          library_names,
+                        "available_slots":        0,
+                    }
+
+                available_workers = False
+                for worker in worker_list:
+                    # Add a slot for each worker regardless of its status
+                    installations_with_info[local_config.get('uuid')]['available_slots'] += 1
                     if worker.get('idle') and not worker.get('paused'):
-                        if not available_workers.get(local_config.get('uuid')):
-                            available_workers[local_config.get('uuid')] = {
-                                "address":                local_config.get('address'),
-                                "enable_task_preloading": local_config.get('enable_task_preloading'),
-                                "workers":                []
-                            }
-                        available_workers[local_config.get('uuid')]['workers'].append(worker)
-                    elif not worker.get('idle') and not worker.get('paused'):
-                        # And an empty entry if all workers are busy and not paused.
-                        # This allows us to know that a remote is available for loading the pending task queue
-                        if not available_workers.get(local_config.get('uuid')):
-                            available_workers[local_config.get('uuid')] = {
-                                "address":                local_config.get('address'),
-                                "enable_task_preloading": local_config.get('enable_task_preloading'),
-                                "workers":                []
-                            }
+                        # If any workers are idle and not paused then we have an available worker slot
+                        available_workers = True
+                        installations_with_info[local_config.get('uuid')]['available_workers'] = True
+                    elif not worker.get('idle'):
+                        # If any workers are busy with a task then also mark that as an an available worker slot
+                        available_workers = True
+                        installations_with_info[local_config.get('uuid')]['available_workers'] = True
+
+                # Check if this installation is configured for preloading
+                if available_workers and local_config.get('enable_task_preloading'):
+                    # Add more slots to fill up the pending task queue
+                    while not current_pending_tasks > max_pending_tasks:
+                        installations_with_info[local_config.get('uuid')]['available_slots'] += 1
+                        current_pending_tasks += 1
+
             except Exception as e:
                 self._log("Failed to contact remote installation '{}'".format(local_config.get('address')), level='warning')
                 continue
 
-        return available_workers
+        return installations_with_info
 
     def within_enabled_link_limits(self, frontend_messages=None):
         """
@@ -602,6 +636,29 @@ class Links(object, metaclass=SingletonType):
             return None
         except Exception as e:
             self._log("Failed to remove remote pending task", message2=str(e), level='error')
+        return {}
+
+    def set_the_remote_task_library(self, address: str, remote_task_id: int, library_name: str):
+        """
+        Set the library for the remote task
+        Defaults to the remote installation's default library
+
+        :return:
+        """
+        try:
+            data = {
+                "id_list":      [remote_task_id],
+                "library_name": library_name,
+            }
+            return self.remote_api_post(address, '/unmanic/api/v2/pending/library/update', data, timeout=7)
+        except requests.exceptions.Timeout:
+            self._log("Request to set remote task library timed out", level='warning')
+            return None
+        except requests.exceptions.RequestException as e:
+            self._log("Request to set remote task library failed", message2=str(e), level='warning')
+            return None
+        except Exception as e:
+            self._log("Failed to set remote task library", message2=str(e), level='error')
         return {}
 
     def get_remote_pending_task_state(self, address: str, remote_task_id: int):
@@ -907,14 +964,19 @@ class RemoteTaskManager(threading.Thread):
 
         # Get source file checksum
         initial_checksum = common.get_file_checksum(original_abspath)
+        initial_file_size = os.path.getsize(original_abspath)
 
         # Loop until we are able to upload the file to the remote installation
         info = {}
         while not self.redundant_flag.is_set():
-            # Check for network transfer lock
-            if not self.links.acquire_network_transfer_lock(address):
-                time.sleep(1)
-                continue
+            # For files smaller than 100MB, just transfer them in parallel
+            # Smaller files add a lot of time overhead with the waiting in line and it slows the whole process down
+            # Larger files benefit from being transferred one at a time.
+            if initial_file_size > 100000000:
+                # Check for network transfer lock
+                if not self.links.acquire_network_transfer_lock(address):
+                    time.sleep(1)
+                    continue
 
             # Send a file to a remote installation.
             self._log("Uploading file to remote installation '{}'".format(original_abspath), level='debug')
@@ -933,6 +995,25 @@ class RemoteTaskManager(threading.Thread):
             # Send request to terminate the remote worker then return
             self.links.remove_task_from_remote_installation(address, remote_task_id)
             return False
+
+        # Set the library of the remote task using the library's name
+        library_id = self.current_task.get_task_library_id()
+        library = Library(library_id)
+        library_name = library.get_name()
+        while not self.redundant_flag.is_set():
+            result = self.links.set_the_remote_task_library(address, remote_task_id, library_name)
+            if result is None:
+                # Unable to reach remote installation
+                time.sleep(2)
+                continue
+            if not result.get('success'):
+                self._log(
+                    "Failed to match a remote library named '{}'. Remote installation will use the default library".format(
+                        library_name), level='warning')
+                # Just log the warning for this. If no matching library name is found it will remain set as the default library
+                break
+            if result.get('success'):
+                break
 
         # Start the remote task
         while not self.redundant_flag.is_set():

@@ -39,6 +39,7 @@ from playhouse.shortcuts import model_to_dict
 
 from unmanic import config
 from unmanic.libs import common, unlogger
+from unmanic.libs.library import Library
 from unmanic.libs.unmodels.tasks import IntegrityError, Tasks
 
 
@@ -101,6 +102,13 @@ class Task(object):
         # Set cache path class attribute
         self.task.cache_path = os.path.join(cache_directory, out_file)
 
+    def get_cache_path(self):
+        if not self.task:
+            raise Exception('Unable to fetch cache path. Task has not been set!')
+        if not self.task.cache_path:
+            raise Exception('Unable to fetch cache path. Task cache path has not been set!')
+        return self.task.cache_path
+
     def get_task_data(self):
         if not self.task:
             raise Exception('Unable to fetch task dictionary. Task has not been set!')
@@ -109,7 +117,7 @@ class Task(object):
 
     def get_task_id(self):
         if not self.task:
-            raise Exception('Unable to fetch task type. Task has not been set!')
+            raise Exception('Unable to fetch task ID. Task has not been set!')
         return self.task.id
 
     def get_task_type(self):
@@ -117,12 +125,16 @@ class Task(object):
             raise Exception('Unable to fetch task type. Task has not been set!')
         return self.task.type
 
-    def get_cache_path(self):
+    def get_task_library_id(self):
         if not self.task:
-            raise Exception('Unable to fetch cache path. Task has not been set!')
-        if not self.task.cache_path:
-            raise Exception('Unable to fetch cache path. Task cache path has not been set!')
-        return self.task.cache_path
+            raise Exception('Unable to fetch task library ID. Task has not been set!')
+        return self.task.library_id
+
+    def get_task_library_name(self):
+        if not self.task:
+            raise Exception('Unable to fetch task library ID. Task has not been set!')
+        library = Library(self.task.library_id)
+        return library.get_name()
 
     def get_destination_data(self):
         if not self.task:
@@ -178,7 +190,7 @@ class Task(object):
         # Get task matching the abspath
         self.task = Tasks.get(abspath=abspath)
 
-    def create_task_by_absolute_path(self, abspath, task_type='local'):
+    def create_task_by_absolute_path(self, abspath, task_type='local', library_id=1):
         """
         Creates the task by it's absolute path.
         If the task already exists in the list, then this will throw an exception and return false
@@ -187,10 +199,11 @@ class Task(object):
 
         :param abspath:
         :param task_type:
+        :param library_id:
         :return:
         """
         try:
-            self.task = Tasks.create(abspath=abspath, status='creating')
+            self.task = Tasks.create(abspath=abspath, status='creating', library_id=library_id)
             self.save()
             self._log("Created new task with ID: {} for {}".format(self.task, abspath), level="debug")
 
@@ -392,7 +405,8 @@ class Task(object):
             Tasks.id.in_(id_list))
         return query.execute()
 
-    def set_tasks_status(self, id_list, status):
+    @staticmethod
+    def set_tasks_status(id_list, status):
         """
         Updates the task status for a given list of tasks by ID
 
@@ -401,4 +415,16 @@ class Task(object):
         :return:
         """
         query = Tasks.update(status=status).where(Tasks.id.in_(id_list))
+        return query.execute()
+
+    @staticmethod
+    def set_tasks_library_id(id_list, library_id):
+        """
+        Updates the task library_id for a given list of tasks by ID
+
+        :param id_list:
+        :param library_id:
+        :return:
+        """
+        query = Tasks.update(library_id=library_id).where(Tasks.id.in_(id_list))
         return query.execute()

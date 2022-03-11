@@ -34,9 +34,10 @@ import json
 import threading
 import queue
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from unmanic.libs import common, installation_link
+from unmanic.libs.library import Library
 from unmanic.libs.plugins import PluginsHandler
 from unmanic.libs.workers import Worker
 
@@ -57,11 +58,11 @@ class Foreman(threading.Thread):
         self.abort_flag.clear()
 
         # Set the current plugin config
-        self.plugin_config = {
+        self.current_config = {
             'settings':      {},
             'settings_hash': ''
         }
-        self.plugin_configuration_changed()
+        self.configuration_changed()
 
         # Set the current time for scheduler
         self.last_schedule_run = datetime.today().strftime('%H:%M')
@@ -91,27 +92,46 @@ class Foreman(threading.Thread):
         """Returns the worker count as an integer"""
         return int(self.settings.get_number_of_workers())
 
-    def save_plugin_config(self, settings=None, settings_hash=None):
+    def save_current_config(self, settings=None, settings_hash=None):
         if settings:
-            self.plugin_config['settings'] = settings
+            self.current_config['settings'] = settings
         if settings_hash:
-            self.plugin_config['settings_hash'] = settings_hash
-        self._log('Updated plugin config', message2=self.plugin_config, level='debug')
+            self.current_config['settings_hash'] = settings_hash
+        self._log('Updated config. If this is modified, all workers will be paused', level='debug')
 
-    def get_current_plugin_configuration(self):
-        plugin_handler = PluginsHandler()
-        all_plugin_settings = plugin_handler.get_settings_of_all_enabled_plugins()
+    @staticmethod
+    def get_current_library_configuration():
+        # Fetch all libraries
+        all_plugin_settings = {}
+        for library in Library.get_all_libraries():
+            library_config = Library(library.get('id'))
+            # Get list of enabled plugins with their settings
+            enabled_plugins = []
+            for enabled_plugin in library_config.get_enabled_plugins(include_settings=True):
+                enabled_plugins.append({
+                    'plugin_id': enabled_plugin.get('plugin_id'),
+                    'settings':  enabled_plugin.get('settings'),
+                })
+
+            # Get the plugin flow
+            plugin_flow = library_config.get_plugin_flow()
+
+            # Append this library's plugin config and flow the the dictionary
+            all_plugin_settings[library.get('id')] = {
+                'enabled_plugins': enabled_plugins,
+                'plugin_flow':     plugin_flow,
+            }
         return all_plugin_settings
 
-    def plugin_configuration_changed(self):
-        current_plugin_settings = self.get_current_plugin_configuration()
+    def configuration_changed(self):
+        current_settings = self.get_current_library_configuration()
         # Compare current settings with foreman recorded settings.
-        json_encoded_settings = json.dumps(current_plugin_settings, sort_keys=True).encode()
+        json_encoded_settings = json.dumps(current_settings, sort_keys=True).encode()
         current_settings_hash = hashlib.md5(json_encoded_settings).hexdigest()
-        if current_settings_hash == self.plugin_config.get('settings_hash', ''):
+        if current_settings_hash == self.current_config.get('settings_hash', ''):
             return False
         # Record current settings
-        self.save_plugin_config(settings=current_plugin_settings, settings_hash=current_settings_hash)
+        self.save_current_config(settings=current_settings, settings_hash=current_settings_hash)
         # Settings have changed
         return True
 
@@ -123,15 +143,13 @@ class Foreman(threading.Thread):
         plugin_handler = PluginsHandler()
         if plugin_handler.get_incompatible_enabled_plugins(frontend_messages):
             valid = False
-        if not plugin_handler.within_enabled_plugin_limits(frontend_messages):
-            valid = False
         if not self.links.within_enabled_link_limits(frontend_messages):
             valid = False
 
         # Check if plugin configuration has been modified. If it has, stop the workers.
         # What we want to avoid here is someone partially modifying the plugin configuration
         #   and having the workers pickup a job mid configuration.
-        if self.plugin_configuration_changed():
+        if self.configuration_changed():
             # Generate a frontend message and falsify validation
             frontend_messages.put(
                 {
@@ -142,6 +160,10 @@ class Foreman(threading.Thread):
                     'timeout': 0
                 }
             )
+            valid = False
+
+        # Ensure library config is within limits
+        if not Library.within_library_count_limits(frontend_messages):
             valid = False
 
         return valid
@@ -232,30 +254,56 @@ class Foreman(threading.Thread):
                     # This thread id is greater than the max number available. We should set it as redundant
                     self.mark_worker_thread_as_redundant(thread)
 
-    def init_remote_task_manager_thread(self):
-        # Fetch the first remote worker from the list
+    def fetch_available_remote_installation(self, library_name=None):
+        # Fetch the first matching remote worker from the list
         assigned_installation_id = None
         assigned_installation_info = {}
         installation_ids = [t for t in self.available_remote_managers]
         for installation_id in installation_ids:
             if installation_id not in self.remote_task_manager_threads:
+                # Check that a remote worker is on an installation with a matching library name
+                installation_library_names = self.available_remote_managers[installation_id].get('library_names', [])
+                if library_name is not None and library_name not in installation_library_names:
+                    continue
                 assigned_installation_info = self.available_remote_managers[installation_id]
                 assigned_installation_id = installation_id
-                del self.available_remote_managers[installation_id]
                 break
+        return assigned_installation_id, assigned_installation_info
+
+    def init_remote_task_manager_thread(self, library_name=None):
+        # Fetch the installation ID and info
+        installation_id, installation_info = self.fetch_available_remote_installation(library_name=library_name)
+        del self.available_remote_managers[installation_id]
 
         # Ensure a worker was assigned
-        if not assigned_installation_info:
-            return
+        if not installation_info:
+            return False
 
         # Startup a thread
-        thread = installation_link.RemoteTaskManager(assigned_installation_id,
-                                                     "RemoteTaskManager-{}".format(assigned_installation_id),
-                                                     assigned_installation_info, self.remote_workers_pending_task_queue,
+        thread = installation_link.RemoteTaskManager(installation_id,
+                                                     "RemoteTaskManager-{}".format(installation_id),
+                                                     installation_info,
+                                                     self.remote_workers_pending_task_queue,
                                                      self.complete_queue)
         thread.daemon = True
         thread.start()
-        self.remote_task_manager_threads[assigned_installation_id] = thread
+        self.remote_task_manager_threads[installation_id] = thread
+        return True
+
+    def remove_stale_available_remote_managers(self):
+        """
+        Loop over the current list of available remote managers and remove any that were marked available over X seconds ago
+        This ensures that the data on these manager info lists are up-to-date if the remote installation config changes.
+
+        :return:
+        """
+        installation_ids = [t for t in self.available_remote_managers]
+        for installation_id in installation_ids:
+            if installation_id not in self.remote_task_manager_threads:
+                # Check that a remote worker is on an installation with a matching library name
+                installation_info = self.available_remote_managers[installation_id]
+                if installation_info.get('created') < datetime.now() - timedelta(seconds=30):
+                    del self.available_remote_managers[installation_id]
 
     def remove_stopped_remote_task_manager_threads(self):
         """
@@ -308,50 +356,23 @@ class Foreman(threading.Thread):
 
         :return:
         """
-        available_workers = self.links.check_remote_installation_for_available_workers()
-        for installation_uuid in available_workers:
-            remote_address = available_workers[installation_uuid].get('address', '')
-            workers_in_installation = available_workers[installation_uuid].get('workers', [])
-            available_worker_count = len(workers_in_installation)
-            worker_number = 0
-            for worker_number in range(available_worker_count):
-                remote_manager_id = "{}|M{}".format(installation_uuid, worker_number)
+        available_installations = self.links.check_remote_installation_for_available_workers()
+        for installation_uuid in available_installations:
+            remote_address = available_installations[installation_uuid].get('address', '')
+            remote_library_names = available_installations[installation_uuid].get('library_names', [])
+            available_slots = available_installations[installation_uuid].get('available_slots', 0)
+            for slot_number in range(available_slots):
+                remote_manager_id = "{}|M{}".format(installation_uuid, slot_number)
                 if remote_manager_id in self.available_remote_managers or remote_manager_id in self.remote_task_manager_threads:
                     # This worker is already managed by a link manager thread or is already in the list of available workers
                     continue
                 # Add this remote worker ID to the list of available remote managers
                 self.available_remote_managers[remote_manager_id] = {
-                    'uuid':    installation_uuid,
-                    'address': remote_address,
+                    'uuid':          installation_uuid,
+                    'address':       remote_address,
+                    'library_names': remote_library_names,
+                    'created':       datetime.now(),
                 }
-            # Check if this installation is configured for preloading
-            if available_workers[installation_uuid].get('enable_task_preloading'):
-                # Add an extra manager so that we can preload the remote pending task queue with one file and save
-                #   network transfer time
-                remote_manager_id = "{}|M{}".format(installation_uuid, (worker_number + 1))
-                if remote_manager_id in self.available_remote_managers or remote_manager_id in self.remote_task_manager_threads:
-                    # This worker is already managed by a link manager thread or is already in the list of available workers
-                    continue
-                self.available_remote_managers[remote_manager_id] = {
-                    'uuid':    installation_uuid,
-                    'address': remote_address,
-                }
-
-    def pause_all_worker_threads(self):
-        """Pause all threads"""
-        result = True
-        for thread in self.worker_threads:
-            if not self.pause_worker_thread(thread):
-                result = False
-        return result
-
-    def resume_all_worker_threads(self):
-        """Resume all threads"""
-        result = True
-        for thread in self.worker_threads:
-            if not self.resume_worker_thread(thread):
-                result = False
-        return result
 
     def start_worker_thread(self, worker_id):
         thread = Worker(worker_id, "Worker-{}".format(worker_id), self.workers_pending_task_queue, self.complete_queue)
@@ -370,6 +391,14 @@ class Foreman(threading.Thread):
         if self.available_remote_managers:
             return True
         return False
+
+    def get_available_remote_library_names(self):
+        library_names = []
+        for installation_id in self.available_remote_managers:
+            for library_name in self.available_remote_managers[installation_id].get('library_names', []):
+                if library_name not in library_names:
+                    library_names.append(library_name)
+        return library_names
 
     def postprocessor_queue_full(self):
         """
@@ -418,6 +447,14 @@ class Foreman(threading.Thread):
         self.worker_threads[worker_id].paused_flag.set()
         return True
 
+    def pause_all_worker_threads(self):
+        """Pause all threads"""
+        result = True
+        for thread in self.worker_threads:
+            if not self.pause_worker_thread(thread):
+                result = False
+        return result
+
     def resume_worker_thread(self, worker_id):
         """
         Resume a single worker thread
@@ -434,6 +471,14 @@ class Foreman(threading.Thread):
 
         self.worker_threads[worker_id].paused_flag.clear()
         return True
+
+    def resume_all_worker_threads(self):
+        """Resume all threads"""
+        result = True
+        for thread in self.worker_threads:
+            if not self.resume_worker_thread(thread):
+                result = False
+        return result
 
     def terminate_worker_thread(self, worker_id):
         """
@@ -452,13 +497,21 @@ class Foreman(threading.Thread):
         self.mark_worker_thread_as_redundant(worker_id)
         return True
 
+    def terminate_all_worker_threads(self):
+        """Terminate all threads"""
+        result = True
+        for thread in self.worker_threads:
+            if not self.terminate_worker_thread(thread):
+                result = False
+        return result
+
     def mark_worker_thread_as_redundant(self, worker_id):
         self.worker_threads[worker_id].redundant_flag.set()
 
     def mark_remote_task_manager_thread_as_redundant(self, link_manager_id):
         self.remote_task_manager_threads[link_manager_id].redundant_flag.set()
 
-    def hand_task_to_workers(self, item, local=True):
+    def hand_task_to_workers(self, item, local=True, library_name=None):
         if local:
             # Place into queue for a local worker to collect
             self.workers_pending_task_queue.put(item)
@@ -466,7 +519,12 @@ class Foreman(threading.Thread):
             # Place into queue for a remote link manager thread to collect
             self.remote_workers_pending_task_queue.put(item)
             # Spawn link manager thread to pickup task
-            self.init_remote_task_manager_thread()
+            if not self.init_remote_task_manager_thread(library_name=library_name):
+                # Remove item from queue
+                self.remote_workers_pending_task_queue.get_nowait()
+                # Return failure. This will cause the item to be requeued at the bottom of the list
+                return False
+        return True
 
     def link_manager_tread_heartbeat(self):
         """
@@ -487,6 +545,8 @@ class Foreman(threading.Thread):
         self.terminate_unlinked_remote_task_manager_threads()
         # Clear out dead threads
         self.remove_stopped_remote_task_manager_threads()
+        # Clear out old available workers (should last only a minute before being refreshed)
+        self.remove_stale_available_remote_managers()
         # Check for updates to the worker availability status of linked remote installations
         self.update_remote_worker_availability_status()
         # Mark this as the last time run
@@ -531,6 +591,11 @@ class Foreman(threading.Thread):
                     # Check if we are able to start up a worker for another encoding job
                     # These queues holds only one task at a time and is used to hand tasks to the workers
                     if self.workers_pending_task_queue.full() or self.remote_workers_pending_task_queue.full():
+                        # In order to simplify the process and run the foreman management in a single thread, if either of
+                        # these are full, it means the thread that is assigned to pick up the item has not done so.
+                        # In order to prevent a second thread starting and taking the first thread's task, we should not
+                        # process any more pending tasks until that first thread is ready and has taken its task out of the
+                        # queue.
                         continue
 
                     # Check if there are any free workers
@@ -550,13 +615,27 @@ class Foreman(threading.Thread):
                         time.sleep(3)
                         continue
 
-                    next_item_to_process = self.task_queue.get_next_pending_tasks(get_local_pending_tasks_only)
+                    # Fetch the next item in the queue
+                    if process_local:
+                        next_item_to_process = self.task_queue.get_next_pending_tasks(local_only=get_local_pending_tasks_only)
+                    else:
+                        # For remote items, run a search matching an available remote installation library
+                        remote_library_names = self.get_available_remote_library_names()
+                        next_item_to_process = self.task_queue.get_next_pending_tasks(local_only=get_local_pending_tasks_only,
+                                                                                      library_names=remote_library_names)
+
                     if next_item_to_process:
                         try:
                             self._log("Processing item - {}".format(next_item_to_process.get_source_abspath()))
                         except Exception as e:
                             self._log("Exception in fetching task absolute path", message2=str(e), level="exception")
-                        self.hand_task_to_workers(next_item_to_process, local=process_local)
+                        success = self.hand_task_to_workers(next_item_to_process, local=process_local,
+                                                            library_name=next_item_to_process.get_task_library_name())
+                        if not success:
+                            self._log("Re-queueing tasks. Unable to find worker capable of processing task '{}'".format(
+                                next_item_to_process.get_source_abspath()), level="warning")
+                            # Re-queue item at the bottom
+                            self.task_queue.requeue_tasks_at_bottom(next_item_to_process.get_task_id())
         except Exception as e:
             self.stop()
             raise Exception(e)

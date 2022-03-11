@@ -332,6 +332,28 @@
                     "success"
                 ]
             },
+            "RequestAddCompletedToPendingTasks": {
+                "type": "object",
+                "properties": {
+                    "id_list": {
+                        "type": "array",
+                        "minItems": 1,
+                        "description": "List of table IDs",
+                        "example": [],
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "library_id": {
+                        "type": "integer",
+                        "default": 0,
+                        "example": 1
+                    }
+                },
+                "required": [
+                    "id_list"
+                ]
+            },
             "CompletedTasksLogRequest": {
                 "type": "object",
                 "properties": {
@@ -444,6 +466,16 @@
                         "type": "string",
                         "description": "The uploaded file md5 checksum",
                         "example": "5425ab3df5cdbad2e1099bb4cb963a4f"
+                    },
+                    "library_id": {
+                        "type": "integer",
+                        "description": "The ID of the library for which this task was created",
+                        "example": 1
+                    },
+                    "library_name": {
+                        "type": "string",
+                        "description": "The name of the library for which this task was created",
+                        "example": "Default"
                     }
                 },
                 "required": [
@@ -508,6 +540,48 @@
                     "position"
                 ]
             },
+            "RequestPendingTaskCreate": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "example": "/library/TEST_FILE.mkv"
+                    },
+                    "library_id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "library_name": {
+                        "type": "string",
+                        "example": "Default"
+                    }
+                },
+                "required": [
+                    "path"
+                ]
+            },
+            "RequestPendingTasksLibraryUpdate": {
+                "type": "object",
+                "properties": {
+                    "id_list": {
+                        "type": "array",
+                        "minItems": 1,
+                        "description": "List of table IDs",
+                        "example": [],
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "library_name": {
+                        "type": "string",
+                        "example": "Default"
+                    }
+                },
+                "required": [
+                    "id_list",
+                    "library_name"
+                ]
+            },
             "TaskDownloadLink": {
                 "type": "object",
                 "properties": {
@@ -564,11 +638,6 @@
                     "installed": {
                         "type": "boolean",
                         "description": "Is the plugin installed",
-                        "example": true
-                    },
-                    "enabled": {
-                        "type": "boolean",
-                        "description": "Is the plugin enabled",
                         "example": true
                     },
                     "update_available": {
@@ -628,6 +697,11 @@
                         "type": "string",
                         "description": "The plugin changelog",
                         "example": "[b][color=56adda]0.0.1[/color][/b]• initial version"
+                    },
+                    "has_config": {
+                        "type": "boolean",
+                        "description": "The plugin has the ability to be configured",
+                        "example": true
                     },
                     "id": {
                         "type": "integer",
@@ -690,6 +764,11 @@
                         "type": "boolean",
                         "default": true,
                         "example": true
+                    },
+                    "library_id": {
+                        "type": "integer",
+                        "default": 0,
+                        "example": 1
                     }
                 },
                 "required": [
@@ -817,6 +896,11 @@
                         "description": "The plugin changelog",
                         "example": "[b][color=56adda]0.0.1[/color][/b]• initial version"
                     },
+                    "has_config": {
+                        "type": "boolean",
+                        "description": "The plugin has the ability to be configured",
+                        "example": true
+                    },
                     "settings": {
                         "description": "The plugin settings",
                         "type": "array",
@@ -849,11 +933,33 @@
                         "items": {
                             "$ref": "#/components/schemas/PluginsConfigInputItem"
                         }
+                    },
+                    "library_id": {
+                        "type": "integer",
+                        "default": 0,
+                        "example": 1
                     }
                 },
                 "required": [
                     "plugin_id",
                     "settings"
+                ]
+            },
+            "RequestPluginsSettingsReset": {
+                "type": "object",
+                "properties": {
+                    "plugin_id": {
+                        "type": "string",
+                        "example": "encoder_video_hevc_vaapi"
+                    },
+                    "library_id": {
+                        "type": "integer",
+                        "default": 0,
+                        "example": 1
+                    }
+                },
+                "required": [
+                    "plugin_id"
                 ]
             },
             "PluginsMetadataInstallableResults": {
@@ -906,6 +1012,11 @@
                         "type": "string",
                         "description": "The plugin changelog",
                         "example": "[b][color=56adda]0.0.1[/color][/b]• initial version"
+                    },
+                    "has_config": {
+                        "type": "boolean",
+                        "description": "The plugin has the ability to be configured",
+                        "example": true
                     },
                     "package_url": {
                         "type": "string",
@@ -978,6 +1089,11 @@
                     "plugin_type": {
                         "type": "string",
                         "example": "library_management.file_test"
+                    },
+                    "library_id": {
+                        "type": "integer",
+                        "default": 1,
+                        "example": 1
                     }
                 },
                 "required": [
@@ -1054,6 +1170,11 @@
                     "plugin_type": {
                         "type": "string",
                         "example": "library_management.file_test"
+                    },
+                    "library_id": {
+                        "type": "integer",
+                        "default": 1,
+                        "example": 1
                     },
                     "plugin_flow": {
                         "minItems": 1,
@@ -1204,7 +1325,6 @@
                             "schedule_full_scan_minutes": 1440,
                             "follow_symlinks": true,
                             "run_full_scan_on_start": false,
-                            "enable_inotify": false,
                             "number_of_workers": 1,
                             "worker_event_schedules": [
                                 {
@@ -1302,6 +1422,221 @@
                 },
                 "required": [
                     "link_config"
+                ]
+            },
+            "LibraryResults": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "",
+                        "example": 1
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "The name of the library",
+                        "example": "Default"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "The library path",
+                        "example": "/library"
+                    },
+                    "locked": {
+                        "type": "boolean",
+                        "description": "If the library is locked and cannot be deleted",
+                        "example": false
+                    }
+                },
+                "required": [
+                    "id",
+                    "locked",
+                    "name",
+                    "path"
+                ]
+            },
+            "SettingsLibrariesList": {
+                "type": "object",
+                "properties": {
+                    "libraries": {
+                        "minItems": 1,
+                        "description": "Results",
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/LibraryResults"
+                        }
+                    }
+                },
+                "required": [
+                    "libraries"
+                ]
+            },
+            "RequestLibraryById": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "The ID of the library",
+                        "example": 1
+                    }
+                },
+                "required": [
+                    "id"
+                ]
+            },
+            "SettingsLibraryConfigReadAndWrite": {
+                "type": "object",
+                "properties": {
+                    "library_config": {
+                        "type": "object",
+                        "description": "The library configuration",
+                        "example": {
+                            "id": 1,
+                            "name": "Default",
+                            "path": "/library",
+                            "enable_scanner": false,
+                            "enable_inotify": false
+                        }
+                    },
+                    "plugins": {
+                        "type": "object",
+                        "description": "The library's enabled plugins",
+                        "example": {
+                            "enabled_plugins": [
+                                {
+                                    "library_id": 1,
+                                    "plugin_id": "notify_plex",
+                                    "name": "Notify Plex",
+                                    "description": "Notify Plex on completion of a task.",
+                                    "icon": "https://raw.githubusercontent.com/Josh5/unmanic.plugin.notify_plex/master/icon.png"
+                                }
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "library_config"
+                ]
+            },
+            "SettingsLibraryPluginConfigExport": {
+                "type": "object",
+                "properties": {
+                    "plugins": {
+                        "type": "object",
+                        "description": "The library's enabled plugins",
+                        "example": {
+                            "enabled_plugins": [
+                                {
+                                    "library_id": 1,
+                                    "plugin_id": "encoder_audio_ac3",
+                                    "name": "Audio Encoder AC3",
+                                    "description": "Ensure all audio streams are encoded with the AC3 codec using the native FFmpeg ac3 encoder.",
+                                    "icon": "https://raw.githubusercontent.com/Josh5/unmanic.plugin.encoder_audio_ac3/master/icon.png"
+                                }
+                            ],
+                            "plugin_flow": {
+                                "library_management.file_test": [
+                                    {
+                                        "plugin_id": "encoder_audio_ac3",
+                                        "name": "Audio Encoder AC3",
+                                        "author": "Josh.5",
+                                        "description": "Ensure all audio streams are encoded with the AC3 codec using the native FFmpeg ac3 encoder.",
+                                        "version": "0.0.2",
+                                        "icon": "https://raw.githubusercontent.com/Josh5/unmanic.plugin.encoder_audio_ac3/master/icon.png"
+                                    }
+                                ],
+                                "worker.process_item": [
+                                    {
+                                        "plugin_id": "encoder_audio_ac3",
+                                        "name": "Audio Encoder AC3",
+                                        "author": "Josh.5",
+                                        "description": "Ensure all audio streams are encoded with the AC3 codec using the native FFmpeg ac3 encoder.",
+                                        "version": "0.0.2",
+                                        "icon": "https://raw.githubusercontent.com/Josh5/unmanic.plugin.encoder_audio_ac3/master/icon.png"
+                                    }
+                                ],
+                                "postprocessor.file_move": [],
+                                "postprocessor.task_result": []
+                            }
+                        }
+                    },
+                    "library_config": {
+                        "type": "object",
+                        "description": "The library configuration",
+                        "example": {
+                            "id": 1,
+                            "name": "Default",
+                            "path": "/library",
+                            "enable_scanner": false,
+                            "enable_inotify": false
+                        }
+                    }
+                },
+                "required": [
+                    "plugins"
+                ]
+            },
+            "SettingsLibraryPluginConfigImport": {
+                "type": "object",
+                "properties": {
+                    "plugins": {
+                        "type": "object",
+                        "description": "The library's enabled plugins",
+                        "example": {
+                            "enabled_plugins": [
+                                {
+                                    "library_id": 1,
+                                    "plugin_id": "encoder_audio_ac3",
+                                    "name": "Audio Encoder AC3",
+                                    "description": "Ensure all audio streams are encoded with the AC3 codec using the native FFmpeg ac3 encoder.",
+                                    "icon": "https://raw.githubusercontent.com/Josh5/unmanic.plugin.encoder_audio_ac3/master/icon.png"
+                                }
+                            ],
+                            "plugin_flow": {
+                                "library_management.file_test": [
+                                    {
+                                        "plugin_id": "encoder_audio_ac3",
+                                        "name": "Audio Encoder AC3",
+                                        "author": "Josh.5",
+                                        "description": "Ensure all audio streams are encoded with the AC3 codec using the native FFmpeg ac3 encoder.",
+                                        "version": "0.0.2",
+                                        "icon": "https://raw.githubusercontent.com/Josh5/unmanic.plugin.encoder_audio_ac3/master/icon.png"
+                                    }
+                                ],
+                                "worker.process_item": [
+                                    {
+                                        "plugin_id": "encoder_audio_ac3",
+                                        "name": "Audio Encoder AC3",
+                                        "author": "Josh.5",
+                                        "description": "Ensure all audio streams are encoded with the AC3 codec using the native FFmpeg ac3 encoder.",
+                                        "version": "0.0.2",
+                                        "icon": "https://raw.githubusercontent.com/Josh5/unmanic.plugin.encoder_audio_ac3/master/icon.png"
+                                    }
+                                ],
+                                "postprocessor.file_move": [],
+                                "postprocessor.task_result": []
+                            }
+                        }
+                    },
+                    "library_config": {
+                        "type": "object",
+                        "description": "The library configuration",
+                        "example": {
+                            "id": 1,
+                            "name": "Default",
+                            "path": "/library",
+                            "enable_scanner": false,
+                            "enable_inotify": false
+                        }
+                    },
+                    "library_id": {
+                        "type": "integer",
+                        "example": 1
+                    }
+                },
+                "required": [
+                    "library_id",
+                    "plugins"
                 ]
             },
             "VersionReadSuccess": {
@@ -1772,7 +2107,7 @@
                     "content": {
                         "application/json": {
                             "schema": {
-                                "$ref": "#/components/schemas/RequestTableUpdateByIdList"
+                                "$ref": "#/components/schemas/RequestAddCompletedToPendingTasks"
                             }
                         }
                     }
@@ -2033,6 +2368,63 @@
                 }
             }
         },
+        "/pending/rescan": {
+            "post": {
+                "description": "Triggers a library scan.",
+                "responses": {
+                    "200": {
+                        "description": "Successful request; Returns success status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BaseSuccess"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/pending/reorder": {
             "post": {
                 "description": "Reorder a list of pending tasks.",
@@ -2043,6 +2435,142 @@
                         "application/json": {
                             "schema": {
                                 "$ref": "#/components/schemas/RequestPendingTasksReorder"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful request; Returns success status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BaseSuccess"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/pending/create": {
+            "post": {
+                "description": "Create a new pending tasks from an absolute path",
+                "requestBody": {
+                    "description": "Specify path and library to create a pending tasks from.",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RequestPendingTaskCreate"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful request; Returns data for the generated task",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PendingTasksTableResults"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/pending/library/update": {
+            "post": {
+                "description": "Set the library of a list of created tasks who's status has not yet been updated.",
+                "requestBody": {
+                    "description": "The ID list of the task to update and the Library Name to use.",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RequestPendingTasksLibraryUpdate"
                             }
                         }
                     }
@@ -2421,7 +2949,7 @@
         },
         "/plugins/enable": {
             "post": {
-                "description": "Enable a list of plugins.",
+                "description": "DEPRECATED! Enable a list of plugins.",
                 "requestBody": {
                     "description": "Requested list of plugins to enable.",
                     "required": true,
@@ -2489,7 +3017,7 @@
         },
         "/plugins/disable": {
             "post": {
-                "description": "Disable a list of plugins.",
+                "description": "DEPRECATED! Disable a list of plugins.",
                 "requestBody": {
                     "description": "Requested list of plugins to disable.",
                     "required": true,
@@ -2557,7 +3085,7 @@
         },
         "/plugins/update": {
             "post": {
-                "description": "Update a list of plugins.",
+                "description": "Update a list of plugins given their DB table IDs.",
                 "requestBody": {
                     "description": "Requested list of plugins to update.",
                     "required": true,
@@ -2625,7 +3153,7 @@
         },
         "/plugins/remove": {
             "delete": {
-                "description": "Remove a list of plugins.",
+                "description": "Remove a list of plugins given their DB table IDs.",
                 "requestBody": {
                     "description": "Requested list of plugins to remove.",
                     "required": true,
@@ -2695,7 +3223,7 @@
             "post": {
                 "description": "Returns a the metadata and settings of a requested plugin.",
                 "requestBody": {
-                    "description": "Requested a single plugin to install.",
+                    "description": "Requested a single plugin's info.",
                     "required": true,
                     "content": {
                         "application/json": {
@@ -2769,6 +3297,74 @@
                         "application/json": {
                             "schema": {
                                 "$ref": "#/components/schemas/RequestPluginsSettingsSave"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful request; Returns success status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BaseSuccess"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/settings/reset": {
+            "post": {
+                "description": "Reset the settings of a single plugin.",
+                "requestBody": {
+                    "description": "Requested a plugins settings be reset.",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RequestPluginsSettingsReset"
                             }
                         }
                     }
@@ -3884,6 +4480,403 @@
                 }
             }
         },
+        "/settings/libraries": {
+            "get": {
+                "description": "Returns a list of all libraries.",
+                "responses": {
+                    "200": {
+                        "description": "Sample response: Returns a list of all libraries.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SettingsLibrariesList"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/settings/library/read": {
+            "post": {
+                "description": "Read the configuration of one library",
+                "requestBody": {
+                    "description": "The ID of the library",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RequestLibraryById"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Sample response: Returns the remote installation link configuration.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SettingsLibraryConfigReadAndWrite"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/settings/library/write": {
+            "post": {
+                "description": "Write the configuration of one library",
+                "requestBody": {
+                    "description": "Requested a dictionary of settings to save.",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SettingsLibraryConfigReadAndWrite"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful request; Returns success status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BaseSuccess"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/settings/library/remove": {
+            "delete": {
+                "description": "Remove a library",
+                "requestBody": {
+                    "description": "Requested a library to remove.",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RequestLibraryById"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful request; Returns success status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BaseSuccess"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/settings/library/export": {
+            "post": {
+                "description": "Export the plugin configuration of one library",
+                "requestBody": {
+                    "description": "The ID of the library",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RequestLibraryById"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Sample response: Returns the remote installation link configuration.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SettingsLibraryPluginConfigExport"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/settings/library/import": {
+            "post": {
+                "description": "Import the configuration of one library",
+                "requestBody": {
+                    "description": "Requested a dictionary of settings to save.",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SettingsLibraryPluginConfigImport"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful request; Returns success status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BaseSuccess"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/upload/pending/file": {
             "post": {
                 "description": "Returns a list of pending tasks.",
@@ -4279,6 +5272,63 @@
                         }
                     }
                 },
+                "responses": {
+                    "200": {
+                        "description": "Successful request; Returns success status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BaseSuccess"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/workers/worker/terminate/all": {
+            "delete": {
+                "description": "Terminate all workers.",
                 "responses": {
                     "200": {
                         "description": "Successful request; Returns success status",

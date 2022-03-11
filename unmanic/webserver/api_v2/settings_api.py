@@ -34,12 +34,16 @@ import tornado.log
 
 from unmanic import config
 from unmanic.libs.installation_link import Links
+from unmanic.libs.library import Library
 from unmanic.libs.uiserver import UnmanicDataQueues
 from unmanic.webserver.api_v2.base_api_handler import BaseApiError, BaseApiHandler
-from unmanic.webserver.api_v2.schema.schemas import RequestRemoteInstallationLinkConfigSchema, \
-    SettingsReadAndWriteSchema, SettingsRemoteInstallationDataSchema, \
+from unmanic.webserver.api_v2.schema.schemas import RequestLibraryByIdSchema, RequestRemoteInstallationLinkConfigSchema, \
+    SettingsLibrariesListSchema, SettingsLibraryConfigReadAndWriteSchema, SettingsLibraryPluginConfigExportSchema, \
+    SettingsLibraryPluginConfigImportSchema, SettingsReadAndWriteSchema, \
+    SettingsRemoteInstallationDataSchema, \
     SettingsRemoteInstallationLinkConfigSchema, SettingsSystemConfigSchema, \
     RequestSettingsRemoteInstallationAddressValidationSchema
+from unmanic.webserver.helpers import plugins
 
 
 class ApiSettingsHandler(BaseApiHandler):
@@ -77,6 +81,36 @@ class ApiSettingsHandler(BaseApiHandler):
             "path_pattern":      r"/settings/link/write",
             "supported_methods": ["POST"],
             "call_method":       "write_link_config",
+        },
+        {
+            "path_pattern":      r"/settings/libraries",
+            "supported_methods": ["GET"],
+            "call_method":       "get_all_libraries",
+        },
+        {
+            "path_pattern":      r"/settings/library/read",
+            "supported_methods": ["POST"],
+            "call_method":       "read_library_config",
+        },
+        {
+            "path_pattern":      r"/settings/library/write",
+            "supported_methods": ["POST"],
+            "call_method":       "write_library_config",
+        },
+        {
+            "path_pattern":      r"/settings/library/remove",
+            "supported_methods": ["DELETE"],
+            "call_method":       "remove_library",
+        },
+        {
+            "path_pattern":      r"/settings/library/export",
+            "supported_methods": ["POST"],
+            "call_method":       "export_library_plugin_config",
+        },
+        {
+            "path_pattern":      r"/settings/library/import",
+            "supported_methods": ["POST"],
+            "call_method":       "import_library_plugin_config",
         },
     ]
 
@@ -452,6 +486,434 @@ class ApiSettingsHandler(BaseApiHandler):
             links = Links()
             links.update_single_remote_installation_link_config(json_request.get('link_config'),
                                                                 json_request.get('distributed_worker_count_target', 0))
+
+            self.write_success()
+            return
+        except BaseApiError as bae:
+            tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
+            return
+        except Exception as e:
+            self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
+            self.write_error()
+
+    def get_all_libraries(self):
+        """
+        Settings - get list of all libraries
+        ---
+        description: Returns a list of all libraries.
+        responses:
+            200:
+                description: 'Sample response: Returns a list of all libraries.'
+                content:
+                    application/json:
+                        schema:
+                            SettingsLibrariesListSchema
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
+        try:
+            libraries = Library.get_all_libraries()
+            response = self.build_response(
+                SettingsLibrariesListSchema(),
+                {
+                    "libraries": libraries,
+                }
+            )
+            self.write_success(response)
+            return
+        except BaseApiError as bae:
+            tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
+            return
+        except Exception as e:
+            self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
+            self.write_error()
+
+    def read_library_config(self):
+        """
+        Settings - read the configuration of one library
+        ---
+        description: Read the configuration of one library
+        requestBody:
+            description: The ID of the library
+            required: True
+            content:
+                application/json:
+                    schema:
+                        RequestLibraryByIdSchema
+        responses:
+            200:
+                description: 'Sample response: Returns the remote installation link configuration.'
+                content:
+                    application/json:
+                        schema:
+                            SettingsLibraryConfigReadAndWriteSchema
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
+        try:
+            json_request = self.read_json_request(RequestLibraryByIdSchema())
+
+            library_settings = {
+                "library_config": {
+                    "id":             0,
+                    "name":           '',
+                    "path":           '/',
+                    "enable_scanner": False,
+                    "enable_inotify": False,
+                },
+                "plugins":        {
+                    "enabled_plugins": [],
+                }
+            }
+            if json_request.get('id'):
+                # Read the library
+                library_config = Library(json_request.get('id'))
+                library_settings = {
+                    "library_config": {
+                        "id":             library_config.get_id(),
+                        "name":           library_config.get_name(),
+                        "path":           library_config.get_path(),
+                        "locked":         library_config.get_locked(),
+                        "enable_scanner": library_config.get_enable_scanner(),
+                        "enable_inotify": library_config.get_enable_inotify(),
+                    },
+                    "plugins":        {
+                        "enabled_plugins": library_config.get_enabled_plugins(),
+                    }
+                }
+
+            response = self.build_response(
+                SettingsLibraryConfigReadAndWriteSchema(),
+                library_settings
+            )
+
+            self.write_success(response)
+            return
+        except BaseApiError as bae:
+            tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
+            return
+        except Exception as e:
+            self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
+            self.write_error()
+
+    def write_library_config(self):
+        """
+        Settings - write the configuration of one library
+        ---
+        description: Write the configuration of one library
+        requestBody:
+            description: Requested a dictionary of settings to save.
+            required: True
+            content:
+                application/json:
+                    schema:
+                        SettingsLibraryConfigReadAndWriteSchema
+        responses:
+            200:
+                description: 'Successful request; Returns success status'
+                content:
+                    application/json:
+                        schema:
+                            BaseSuccessSchema
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
+        try:
+            json_request = self.read_json_request(SettingsLibraryConfigReadAndWriteSchema())
+
+            # Save settings
+            from unmanic.webserver.helpers import settings
+            library_config = json_request['library_config']
+            plugin_config = json_request.get('plugins', {})
+            library_id = library_config.get('id', 0)
+            settings.save_library_config(library_id, library_config=library_config, plugin_config=plugin_config)
+
+            self.write_success()
+            return
+        except BaseApiError as bae:
+            tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
+            return
+        except Exception as e:
+            self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
+            self.write_error()
+
+    def remove_library(self):
+        """
+        Plugins - remove
+        ---
+        description: Remove a library
+        requestBody:
+            description: Requested a library to remove.
+            required: True
+            content:
+                application/json:
+                    schema:
+                        RequestLibraryByIdSchema
+        responses:
+            200:
+                description: 'Successful request; Returns success status'
+                content:
+                    application/json:
+                        schema:
+                            BaseSuccessSchema
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
+        try:
+            json_request = self.read_json_request(RequestLibraryByIdSchema())
+
+            # Fetch existing library by ID
+            library = Library(json_request.get('id'))
+
+            # Delete the library
+            if not library.delete():
+                self.set_status(self.STATUS_ERROR_INTERNAL, reason="Failed to remove library by its ID")
+                self.write_error()
+                return
+
+            self.write_success()
+            return
+        except BaseApiError as bae:
+            tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
+            return
+        except Exception as e:
+            self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
+            self.write_error()
+
+    def export_library_plugin_config(self):
+        """
+        Settings - export the plugin configuration of one library
+        ---
+        description: Export the plugin configuration of one library
+        requestBody:
+            description: The ID of the library
+            required: True
+            content:
+                application/json:
+                    schema:
+                        RequestLibraryByIdSchema
+        responses:
+            200:
+                description: 'Sample response: Returns the remote installation link configuration.'
+                content:
+                    application/json:
+                        schema:
+                            SettingsLibraryPluginConfigExportSchema
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
+        try:
+            json_request = self.read_json_request(RequestLibraryByIdSchema())
+
+            # Read the library
+            library_config = Library(json_request.get('id'))
+
+            # Get list of enabled plugins with their settings
+            enabled_plugins = []
+            for enabled_plugin in library_config.get_enabled_plugins(include_settings=True):
+                enabled_plugins.append({
+                    'plugin_id': enabled_plugin.get('plugin_id'),
+                    'settings':  enabled_plugin.get('settings'),
+                })
+
+            # Create plugin flow
+            plugin_flow = {}
+            for plugin_type in plugins.get_plugin_types_with_flows():
+                plugin_flow[plugin_type] = []
+                flow = plugins.get_enabled_plugin_flows_for_plugin_type(plugin_type, json_request.get('id'))
+                for f in flow:
+                    plugin_flow[plugin_type].append(f.get('plugin_id'))
+
+            plugin_settings = {
+                "plugins":        {
+                    "enabled_plugins": enabled_plugins,
+                    "plugin_flow":     plugin_flow,
+                },
+                "library_config": {
+                    "name":           library_config.get_name(),
+                    "path":           library_config.get_path(),
+                    "enable_scanner": library_config.get_enable_scanner(),
+                    "enable_inotify": library_config.get_enable_inotify(),
+                },
+            }
+
+            response = self.build_response(
+                SettingsLibraryPluginConfigExportSchema(),
+                plugin_settings
+            )
+
+            self.write_success(response)
+            return
+        except BaseApiError as bae:
+            tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
+            return
+        except Exception as e:
+            self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
+            self.write_error()
+
+    def import_library_plugin_config(self):
+        """
+        Settings - import the plugin configuration of one library
+        ---
+        description: Import the configuration of one library
+        requestBody:
+            description: Requested a dictionary of settings to save.
+            required: True
+            content:
+                application/json:
+                    schema:
+                        SettingsLibraryPluginConfigImportSchema
+        responses:
+            200:
+                description: 'Successful request; Returns success status'
+                content:
+                    application/json:
+                        schema:
+                            BaseSuccessSchema
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
+        try:
+            json_request = self.read_json_request(SettingsLibraryPluginConfigImportSchema())
+
+            # Save settings
+            from unmanic.webserver.helpers import settings
+            library_config = json_request.get('library_config')
+            plugin_config = json_request.get('plugins', {})
+            library_id = json_request.get('library_id')
+            settings.save_library_config(library_id, library_config=library_config, plugin_config=plugin_config)
 
             self.write_success()
             return

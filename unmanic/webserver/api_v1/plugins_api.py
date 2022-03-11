@@ -46,34 +46,9 @@ class ApiPluginsHandler(BaseApiHandler):
 
     routes = [
         {
-            "supported_methods": ["POST"],
-            "call_method":       "manage_installed_plugins_list",
-            "path_pattern":      r"/api/v1/plugins/installed",
-        },
-        {
-            "supported_methods": ["POST"],
-            "call_method":       "get_installed_plugin_flow",
-            "path_pattern":      r"/api/v1/plugins/flow",
-        },
-        {
-            "supported_methods": ["POST"],
-            "call_method":       "set_installed_plugin_flow",
-            "path_pattern":      r"/api/v1/plugins/flow/save",
-        },
-        {
             "supported_methods": ["GET"],
             "call_method":       "get_plugin_list",
             "path_pattern":      r"/api/v1/plugins/list",
-        },
-        {
-            "supported_methods": ["POST"],
-            "call_method":       "get_plugin_info",
-            "path_pattern":      r"/api/v1/plugins/info",
-        },
-        {
-            "supported_methods": ["POST"],
-            "call_method":       "update_plugin_settings",
-            "path_pattern":      r"/api/v1/plugins/settings/update",
         },
         {
             "supported_methods": ["POST"],
@@ -112,39 +87,6 @@ class ApiPluginsHandler(BaseApiHandler):
 
     def post(self, path):
         self.action_route()
-
-    def manage_installed_plugins_list(self, *args, **kwargs):
-        request_dict = json.loads(self.request.body)
-
-        plugins = PluginsHandler()
-
-        # Uninstall selected plugins
-        if request_dict.get("customActionName") == "remove-selected-plugins":
-            if not plugins.uninstall_plugins_by_db_table_id(request_dict.get("id")):
-                self.write(json.dumps({"success": False}))
-                return
-
-        # Update selected plugins
-        if request_dict.get("customActionName") == "update-selected-plugins":
-            if not plugins.update_plugins_by_db_table_id(request_dict.get("id")):
-                self.write(json.dumps({"success": False}))
-                return
-
-        # Enable selected plugins
-        if request_dict.get("customActionName") == "enable-selected-plugins":
-            if not plugins.enable_plugin_by_db_table_id(request_dict.get("id")):
-                self.write(json.dumps({"success": False}))
-                return
-
-        # Disable selected plugins
-        if request_dict.get("customActionName") == "disable-selected-plugins":
-            if not plugins.disable_plugin_by_db_table_id(request_dict.get("id")):
-                self.write(json.dumps({"success": False}))
-                return
-
-        # Return a list of plugins based on the request JSON body
-        results = self.prepare_filtered_plugins(request_dict)
-        self.write(json.dumps(results))
 
     def prepare_filtered_plugins(self, request_dict):
         """
@@ -260,44 +202,6 @@ class ApiPluginsHandler(BaseApiHandler):
             # Return failure
             self.write(json.dumps({"success": False}))
 
-    def get_installed_plugin_flow(self, *args, **kwargs):
-        plugin_type = self.get_argument('plugin_type')
-
-        plugin_handler = PluginsHandler()
-        plugin_modules = plugin_handler.get_enabled_plugin_modules_by_type(plugin_type)
-
-        # Only return the data that we need
-        return_plugin_flow = []
-        for plugin_module in plugin_modules:
-            return_plugin_flow.append(
-                {
-                    "plugin_id": plugin_module.get("plugin_id"),
-                    "name":      plugin_module.get("name"),
-                }
-            )
-        self.write(json.dumps({"success": True, "plugin_flow": return_plugin_flow}))
-
-    def set_installed_plugin_flow(self, *args, **kwargs):
-        request_dict = json.loads(self.request.body)
-
-        plugin_type = request_dict.get('plugin_type')
-        if not plugin_type:
-            # Return failure
-            self.write(json.dumps({"success": False, "error": "Missing plugin_type"}))
-            return
-
-        flow = request_dict.get('flow', [])
-
-        plugins = PluginsHandler()
-        success = plugins.set_plugin_flow(plugin_type, flow)
-
-        if success:
-            # Return success
-            self.write(json.dumps({"success": True}))
-        else:
-            # Return failure
-            self.write(json.dumps({"success": False}))
-
     def get_plugin_list(self, *args, **kwargs):
         plugins = PluginsHandler()
         # Fetch a list of plugin data cached locally
@@ -317,81 +221,6 @@ class ApiPluginsHandler(BaseApiHandler):
         else:
             # Return failure
             self.write(json.dumps({"success": False}))
-
-    def __get_plugin_settings(self, plugin_id):
-        """
-        Given a plugin ID , return a list of plugin settings for that plugin
-
-        :param plugin_id:
-        :return:
-        """
-        settings = []
-
-        # Check plugin for settings
-        plugin_executor = PluginExecutor()
-        plugin_settings, plugin_settings_meta = plugin_executor.get_plugin_settings(plugin_id)
-        if plugin_settings:
-            for key in plugin_settings:
-                form_input = {
-                    "key_id":         hashlib.md5(key.encode('utf8')).hexdigest(),
-                    "key":            key,
-                    "value":          plugin_settings.get(key),
-                    "input_type":     None,
-                    "label":          None,
-                    "select_options": [],
-                    "range_options":  {},
-                    "display":        "visible",
-                }
-
-                plugin_setting_meta = plugin_settings_meta.get(key, {})
-
-                # Set input type for form
-                form_input['input_type'] = plugin_setting_meta.get('input_type', None)
-                if not form_input['input_type']:
-                    form_input['input_type'] = "text"
-                    if isinstance(form_input['value'], bool):
-                        form_input['input_type'] = "checkbox"
-
-                # Handle unsupported input types (where they may be supported in future versions of Unmanic)
-                supported_input_types = [
-                    "text",
-                    "textarea",
-                    "select",
-                    "checkbox",
-                    "range",
-                    "browse_directory",
-                ]
-                if form_input['input_type'] not in supported_input_types:
-                    form_input['input_type'] = "text"
-
-                # Set input display options
-                form_input['display'] = plugin_setting_meta.get('display', 'visible')
-
-                # Set input label text
-                form_input['label'] = plugin_setting_meta.get('label', None)
-                if not form_input['label']:
-                    form_input['label'] = key
-
-                # Set options if form input is select
-                if form_input['input_type'] == 'select':
-                    form_input['select_options'] = plugin_setting_meta.get('select_options', [])
-                    if not form_input['select_options']:
-                        # No options are given. Revert back to text input
-                        form_input['input_type'] = 'text'
-
-                # Set options if form input is range
-                if form_input['input_type'] == 'range':
-                    range_options = plugin_setting_meta.get('range_options')
-                    if not range_options:
-                        # No options are given. Revert back to text input
-                        form_input['input_type'] = 'text'
-                    else:
-                        form_input['range_options'] = range_options
-                        if not range_options.get('suffix'):
-                            form_input['range_options']['suffix'] = ''
-
-                settings.append(form_input)
-        return settings
 
     def __get_plugin_changelog(self, plugin_id):
         """
@@ -414,104 +243,3 @@ class ApiPluginsHandler(BaseApiHandler):
         # Fetch plugin changelog
         plugin_executor = PluginExecutor()
         return plugin_executor.get_plugin_long_description(plugin_id)
-
-    def __get_plugin_info_and_settings(self, plugin_id):
-        plugins = PluginsHandler()
-
-        plugin_installed = True
-        plugin_results = plugins.get_plugin_list_filtered_and_sorted(plugin_id=plugin_id)
-        if not plugin_results:
-            # This plugin is not installed
-            plugin_installed = False
-
-            # Try to fetch it from the repository
-            plugin_list = plugins.get_installable_plugins_list()
-            for plugin in plugin_list:
-                if plugin.get('plugin_id') == plugin_id:
-                    # Create changelog text from remote changelog text file
-                    plugin['changelog'] = plugins.read_remote_changelog_file(plugin.get('changelog_url'))
-                    # Create list as the 'plugin_results' var above will also have returned a list if any results were found.
-                    plugin_results = [plugin]
-                    break
-
-        # Iterate over plugins and append them to the plugin data
-        plugin_data = {}
-        for plugin_result in plugin_results:
-            # Set params as required in template
-            plugin_data = {
-                'id':          plugin_result.get('id'),
-                'plugin_id':   plugin_result.get('plugin_id'),
-                'icon':        plugin_result.get('icon'),
-                'name':        plugin_result.get('name'),
-                'description': plugin_result.get('description'),
-                'tags':        plugin_result.get('tags'),
-                'author':      plugin_result.get('author'),
-                'version':     plugin_result.get('version'),
-                'changelog':   plugin_result.get('changelog', ''),
-                'settings':    [],
-            }
-            if plugin_installed:
-                plugin_data['settings'] = self.__get_plugin_settings(plugin_result.get('plugin_id'))
-                plugin_data['changelog'] = "".join(self.__get_plugin_changelog(plugin_result.get('plugin_id')))
-                plugin_data['description'] += "\n" + "".join(
-                    self.__get_plugin_long_description(plugin_result.get('plugin_id')))
-            break
-
-        return plugin_data
-
-    def get_plugin_info(self, *args, **kwargs):
-        # Fetch ID of plugin to get Info for
-        plugin_id = self.get_argument('plugin_id')
-
-        # Fetch plugin info (and settings if any)
-        plugin_data = self.__get_plugin_info_and_settings(plugin_id)
-
-        self.write(json.dumps({"success": True, "plugin_info": plugin_data}))
-
-    def update_plugin_settings(self, *args, **kwargs):
-        return_data = {
-            "success": False
-        }
-
-        # Fetch ID of plugin to get Info for
-        plugin_id = self.get_argument('plugin_id')
-
-        # Fetch plugin info (and settings if any)
-        plugin_data = self.__get_plugin_info_and_settings(plugin_id)
-
-        # If no plugin data was found for the posted plugin table ID, then return a failure response
-        if not plugin_data:
-            return return_data
-
-        # Create a dictionary of all posted arguments
-        post_params = {}
-        for k, v in self.request.arguments.items():
-            post_params[k] = v[0].decode("utf-8")
-
-        # Loop over all plugin settings in order to find matches in the posted params
-        settings_to_save = {}
-        for setting in plugin_data.get('settings'):
-            key = setting.get('key')
-            key_id = setting.get('key_id')
-            input_type = setting.get('input_type')
-            # Check if setting is in params
-            if key_id in post_params:
-                post_value = post_params.get(key_id, '')
-                # Check if value should be boolean
-                if input_type == 'checkbox':
-                    post_value = True if post_value.lower() == 'true' else False
-                # Add that to our dictionary of settings to save
-                settings_to_save[key] = post_value
-
-        # If we found settings in the post params that need to be saved, save them...
-        result = False
-        if settings_to_save:
-            plugin_executor = PluginExecutor()
-            saved_all_settings = plugin_executor.save_plugin_settings(plugin_data.get('plugin_id'), settings_to_save)
-            # If the save function was successful
-            if saved_all_settings:
-                # Update settings in plugin data that will be returned
-                plugin_data['settings'] = self.__get_plugin_settings(plugin_id)
-                result = True
-
-        self.write(json.dumps({"success": result, "plugin_info": plugin_data}))

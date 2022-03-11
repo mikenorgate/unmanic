@@ -36,6 +36,7 @@ import time
 
 from unmanic import config
 from unmanic.libs import common, history
+from unmanic.libs.library import Library
 from unmanic.libs.plugins import PluginsHandler
 
 """
@@ -86,7 +87,7 @@ class PostProcessor(threading.Thread):
         while not self.abort_flag.is_set():
             time.sleep(1)
 
-            if not self.all_plugins_are_compatible():
+            if not self.system_configuration_is_valid():
                 time.sleep(2)
                 continue
 
@@ -115,13 +116,17 @@ class PostProcessor(threading.Thread):
 
         self._log("Leaving PostProcessor Monitor loop...")
 
-    def all_plugins_are_compatible(self):
-        """Ensure all plugins are compatible before running"""
+    def system_configuration_is_valid(self):
+        """
+        Check and ensure the system configuration is correct for running
+
+        :return:
+        """
         valid = True
         plugin_handler = PluginsHandler()
         if plugin_handler.get_incompatible_enabled_plugins(self.data_queues.get('frontend_messages')):
             valid = False
-        if not plugin_handler.within_enabled_plugin_limits(self.data_queues.get('frontend_messages')):
+        if not Library.within_library_count_limits(self.data_queues.get('frontend_messages')):
             valid = False
         return valid
 
@@ -131,6 +136,7 @@ class PostProcessor(threading.Thread):
 
         # Read current task data
         # task_data = self.current_task.get_task_data()
+        library_id = self.current_task.get_task_library_id()
         cache_path = self.current_task.get_cache_path()
         source_data = self.current_task.get_source_data()
         destination_data = self.current_task.get_destination_data()
@@ -142,7 +148,8 @@ class PostProcessor(threading.Thread):
             # Run a postprocess file movement on the cache file for for each plugin that configures it
 
             # Fetch all 'postprocessor.file_move' plugin modules
-            plugin_modules = plugin_handler.get_enabled_plugin_modules_by_type('postprocessor.file_move')
+            plugin_modules = plugin_handler.get_enabled_plugin_modules_by_type('postprocessor.file_move',
+                                                                               library_id=library_id)
 
             # Check if the source file needs to be remove by default (only if it does not match the destination file)
             remove_source_file = False
@@ -150,12 +157,21 @@ class PostProcessor(threading.Thread):
                 remove_source_file = True
 
             # Set initial data (some fields will be overwritten further down)
+            # - 'library_id'                - The library ID for this task
+            # - 'source_data'               - Dictionary of data pertaining to the source file
+            # - 'remove_source_file'        - True to remove the original file (default is True if file name has changed)
+            # - 'copy_file'                 - True to run a plugin initiated file copy (default is False unless the plugin says otherwise)
+            # - 'file_in'                   - Source path to copy from (if 'copy_file' is True)
+            # - 'file_out'                  - Destination path to copy to (if 'copy_file' is True)
+            # - 'run_default_file_copy'     - Prevent the final Unmanic post-process file movement (if different from the original file name)
             data = {
-                "source_data":        None,
-                'remove_source_file': remove_source_file,
-                'copy_file':          None,
-                "file_in":            None,
-                "file_out":           None,
+                'library_id':            library_id,
+                'source_data':           None,
+                'remove_source_file':    remove_source_file,
+                'copy_file':             None,
+                'file_in':               None,
+                'file_out':              None,
+                'run_default_file_copy': True,
             }
 
             for plugin_module in plugin_modules:
@@ -182,8 +198,9 @@ class PostProcessor(threading.Thread):
                 else:
                     self._log("Plugin did not request a file copy ({})".format(plugin_module.get('plugin_id')), level='debug')
 
+            # Unmanic's default file movement process
             # Only carry out final post-processor file moments if all others were successful
-            if file_move_processes_success:
+            if file_move_processes_success and data.get('run_default_file_copy'):
                 # Run the default post-process file movement.
                 # This will always move the file back to the original location.
                 # If that original location is the same file name, it will overwrite the original file.
@@ -195,6 +212,9 @@ class PostProcessor(threading.Thread):
                 elif not self.__copy_file(cache_path, destination_data.get('abspath'), destination_files, 'DEFAULT'):
                     file_move_processes_success = False
 
+            # Source file removal process
+            # Only run if all final post-processor file moments were successful
+            if file_move_processes_success:
                 # Check if the remove source flag is still True after all plugins have run. If so, we will remove the source file
                 if data.get('remove_source_file'):
                     # Only carry out a source removal if the file exists and the final copy was also successful
@@ -212,15 +232,16 @@ class PostProcessor(threading.Thread):
                         cache_path), level="error")
 
         else:
-            self._log("Encoded file failed post processing test '{}'".format(cache_path),
+            self._log("Skipping file movement post-processor as the task was not successful '{}'".format(cache_path),
                       level='warning')
 
         # Fetch all 'postprocessor.task_result' plugin modules
-        plugin_modules = plugin_handler.get_enabled_plugin_modules_by_type('postprocessor.task_result')
+        plugin_modules = plugin_handler.get_enabled_plugin_modules_by_type('postprocessor.task_result', library_id=library_id)
 
         for plugin_module in plugin_modules:
             data = {
-                "source_data":                 source_data,
+                'library_id':                  library_id,
+                'source_data':                 source_data,
                 'task_processing_success':     self.current_task.task.success,
                 'file_move_processes_success': file_move_processes_success,
                 'destination_files':           destination_files,

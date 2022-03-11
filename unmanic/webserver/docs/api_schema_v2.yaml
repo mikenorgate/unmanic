@@ -212,6 +212,30 @@ components:
       - error
       - messages
       type: object
+    LibraryResults:
+      properties:
+        id:
+          description: ''
+          example: 1
+          type: integer
+        name:
+          description: The name of the library
+          example: Default
+          type: string
+        path:
+          description: The library path
+          example: /library
+          type: string
+        locked:
+          description: If the library is locked and cannot be deleted
+          example: false
+          type: boolean
+      required:
+      - id
+      - locked
+      - name
+      - path
+      type: object
     PendingTasks:
       properties:
         recordsTotal:
@@ -257,6 +281,14 @@ components:
         checksum:
           description: The uploaded file md5 checksum
           example: 5425ab3df5cdbad2e1099bb4cb963a4f
+          type: string
+        library_id:
+          description: The ID of the library for which this task was created
+          example: 1
+          type: integer
+        library_name:
+          description: The name of the library for which this task was created
+          example: Default
           type: string
       required:
       - abspath
@@ -339,10 +371,6 @@ components:
       properties:
         installed:
           description: Is the plugin installed
-          example: true
-          type: boolean
-        enabled:
-          description: Is the plugin enabled
           example: true
           type: boolean
         update_available:
@@ -488,6 +516,10 @@ components:
           description: The plugin changelog
           example: "[b][color=56adda]0.0.1[/color][/b]\u2022 initial version"
           type: string
+        has_config:
+          description: The plugin has the ability to be configured
+          example: true
+          type: boolean
         settings:
           description: The plugin settings
           items:
@@ -553,6 +585,10 @@ components:
           description: The plugin changelog
           example: "[b][color=56adda]0.0.1[/color][/b]\u2022 initial version"
           type: string
+        has_config:
+          description: The plugin has the ability to be configured
+          example: true
+          type: boolean
         package_url:
           description: The plugin package download URL
           example: https://raw.githubusercontent.com/Unmanic/unmanic-plugins/repo/plugin_id/plugin_id-1.0.0.zip
@@ -618,6 +654,10 @@ components:
           description: The plugin changelog
           example: "[b][color=56adda]0.0.1[/color][/b]\u2022 initial version"
           type: string
+        has_config:
+          description: The plugin has the ability to be configured
+          example: true
+          type: boolean
         id:
           description: Item table ID
           example: 1
@@ -632,6 +672,22 @@ components:
       - status
       - tags
       - version
+      type: object
+    RequestAddCompletedToPendingTasks:
+      properties:
+        id_list:
+          description: List of table IDs
+          example: &id003 []
+          items:
+            type: integer
+          minItems: 1
+          type: array
+        library_id:
+          default: 0
+          example: 1
+          type: integer
+      required:
+      - id_list
       type: object
     RequestDirectoryListingData:
       properties:
@@ -673,6 +729,15 @@ components:
           example: desc
           type: string
       type: object
+    RequestLibraryById:
+      properties:
+        id:
+          description: The ID of the library
+          example: 1
+          type: integer
+      required:
+      - id
+      type: object
     RequestPendingTableData:
       properties:
         start:
@@ -702,11 +767,41 @@ components:
           example: desc
           type: string
       type: object
+    RequestPendingTaskCreate:
+      properties:
+        path:
+          example: /library/TEST_FILE.mkv
+          type: string
+        library_id:
+          example: 1
+          type: integer
+        library_name:
+          example: Default
+          type: string
+      required:
+      - path
+      type: object
+    RequestPendingTasksLibraryUpdate:
+      properties:
+        id_list:
+          description: List of table IDs
+          example: *id003
+          items:
+            type: integer
+          minItems: 1
+          type: array
+        library_name:
+          example: Default
+          type: string
+      required:
+      - id_list
+      - library_name
+      type: object
     RequestPendingTasksReorder:
       properties:
         id_list:
           description: List of table IDs
-          example: &id003 []
+          example: *id003
           items:
             type: integer
           minItems: 1
@@ -739,6 +834,10 @@ components:
         plugin_type:
           example: library_management.file_test
           type: string
+        library_id:
+          default: 1
+          example: 1
+          type: integer
       required:
       - plugin_type
       type: object
@@ -755,6 +854,22 @@ components:
           default: true
           example: true
           type: boolean
+        library_id:
+          default: 0
+          example: 1
+          type: integer
+      required:
+      - plugin_id
+      type: object
+    RequestPluginsSettingsReset:
+      properties:
+        plugin_id:
+          example: encoder_video_hevc_vaapi
+          type: string
+        library_id:
+          default: 0
+          example: 1
+          type: integer
       required:
       - plugin_id
       type: object
@@ -768,6 +883,10 @@ components:
           items:
             $ref: '#/components/schemas/PluginsConfigInputItem'
           type: array
+        library_id:
+          default: 0
+          example: 1
+          type: integer
       required:
       - plugin_id
       - settings
@@ -815,6 +934,10 @@ components:
         plugin_type:
           example: library_management.file_test
           type: string
+        library_id:
+          default: 1
+          example: 1
+          type: integer
         plugin_flow:
           description: Saved flow
           items:
@@ -897,6 +1020,102 @@ components:
       - level
       - uuid
       type: object
+    SettingsLibrariesList:
+      properties:
+        libraries:
+          description: Results
+          items:
+            $ref: '#/components/schemas/LibraryResults'
+          minItems: 1
+          type: array
+      required:
+      - libraries
+      type: object
+    SettingsLibraryConfigReadAndWrite:
+      properties:
+        library_config:
+          description: The library configuration
+          example:
+            enable_inotify: false
+            enable_scanner: false
+            id: 1
+            name: Default
+            path: /library
+          type: object
+        plugins:
+          description: The library's enabled plugins
+          example:
+            enabled_plugins:
+            - description: Notify Plex on completion of a task.
+              icon: https://raw.githubusercontent.com/Josh5/unmanic.plugin.notify_plex/master/icon.png
+              library_id: 1
+              name: Notify Plex
+              plugin_id: notify_plex
+          type: object
+      required:
+      - library_config
+      type: object
+    SettingsLibraryPluginConfigExport:
+      properties:
+        plugins:
+          description: The library's enabled plugins
+          example: &id004
+            enabled_plugins:
+            - description: Ensure all audio streams are encoded with the AC3 codec
+                using the native FFmpeg ac3 encoder.
+              icon: https://raw.githubusercontent.com/Josh5/unmanic.plugin.encoder_audio_ac3/master/icon.png
+              library_id: 1
+              name: Audio Encoder AC3
+              plugin_id: encoder_audio_ac3
+            plugin_flow:
+              library_management.file_test:
+              - author: Josh.5
+                description: Ensure all audio streams are encoded with the AC3 codec
+                  using the native FFmpeg ac3 encoder.
+                icon: https://raw.githubusercontent.com/Josh5/unmanic.plugin.encoder_audio_ac3/master/icon.png
+                name: Audio Encoder AC3
+                plugin_id: encoder_audio_ac3
+                version: 0.0.2
+              postprocessor.file_move: []
+              postprocessor.task_result: []
+              worker.process_item:
+              - author: Josh.5
+                description: Ensure all audio streams are encoded with the AC3 codec
+                  using the native FFmpeg ac3 encoder.
+                icon: https://raw.githubusercontent.com/Josh5/unmanic.plugin.encoder_audio_ac3/master/icon.png
+                name: Audio Encoder AC3
+                plugin_id: encoder_audio_ac3
+                version: 0.0.2
+          type: object
+        library_config:
+          description: The library configuration
+          example: &id005
+            enable_inotify: false
+            enable_scanner: false
+            id: 1
+            name: Default
+            path: /library
+          type: object
+      required:
+      - plugins
+      type: object
+    SettingsLibraryPluginConfigImport:
+      properties:
+        plugins:
+          description: The library's enabled plugins
+          example: *id004
+          type: object
+        library_config:
+          description: The library configuration
+          example: *id005
+          type: object
+        library_id:
+          example: 1
+          type: integer
+      required:
+      - library_id
+      - plugins
+      type: object
     SettingsReadAndWrite:
       properties:
         settings:
@@ -904,7 +1123,6 @@ components:
           example:
             cache_path: /tmp/unmanic
             debugging: false
-            enable_inotify: false
             enable_library_scanner: false
             follow_symlinks: true
             library_path: /library
@@ -1284,7 +1502,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RequestTableUpdateByIdList'
+              $ref: '#/components/schemas/RequestAddCompletedToPendingTasks'
         description: Requested list of items to reprocess.
         required: true
       responses:
@@ -1440,6 +1658,40 @@ paths:
               schema:
                 $ref: '#/components/schemas/InternalError'
           description: Internal error; Check `error` for exception
+  /pending/rescan:
+    post:
+      description: Triggers a library scan.
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseSuccess'
+          description: Successful request; Returns success status
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+          description: Bad request; Check `messages` for any validation errors
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEndpoint'
+          description: Bad request; Requested endpoint not found
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadMethod'
+          description: Bad request; Requested method is not allowed
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+          description: Internal error; Check `error` for exception
   /pending/reorder:
     post:
       description: Reorder a list of pending tasks.
@@ -1449,6 +1701,89 @@ paths:
             schema:
               $ref: '#/components/schemas/RequestPendingTasksReorder'
         description: Requested list of items to reorder.
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseSuccess'
+          description: Successful request; Returns success status
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+          description: Bad request; Check `messages` for any validation errors
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEndpoint'
+          description: Bad request; Requested endpoint not found
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadMethod'
+          description: Bad request; Requested method is not allowed
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+          description: Internal error; Check `error` for exception
+  /pending/create:
+    post:
+      description: Create a new pending tasks from an absolute path
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestPendingTaskCreate'
+        description: Specify path and library to create a pending tasks from.
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingTasksTableResults'
+          description: Successful request; Returns data for the generated task
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+          description: Bad request; Check `messages` for any validation errors
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEndpoint'
+          description: Bad request; Requested endpoint not found
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadMethod'
+          description: Bad request; Requested method is not allowed
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+          description: Internal error; Check `error` for exception
+  /pending/library/update:
+    post:
+      description: Set the library of a list of created tasks who's status has not
+        yet been updated.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestPendingTasksLibraryUpdate'
+        description: The ID list of the task to update and the Library Name to use.
         required: true
       responses:
         '200':
@@ -1676,7 +2011,7 @@ paths:
           description: Internal error; Check `error` for exception
   /plugins/enable:
     post:
-      description: Enable a list of plugins.
+      description: DEPRECATED! Enable a list of plugins.
       requestBody:
         content:
           application/json:
@@ -1717,7 +2052,7 @@ paths:
           description: Internal error; Check `error` for exception
   /plugins/disable:
     post:
-      description: Disable a list of plugins.
+      description: DEPRECATED! Disable a list of plugins.
       requestBody:
         content:
           application/json:
@@ -1758,7 +2093,7 @@ paths:
           description: Internal error; Check `error` for exception
   /plugins/update:
     post:
-      description: Update a list of plugins.
+      description: Update a list of plugins given their DB table IDs.
       requestBody:
         content:
           application/json:
@@ -1799,7 +2134,7 @@ paths:
           description: Internal error; Check `error` for exception
   /plugins/remove:
     delete:
-      description: Remove a list of plugins.
+      description: Remove a list of plugins given their DB table IDs.
       requestBody:
         content:
           application/json:
@@ -1846,7 +2181,7 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/RequestPluginsInfo'
-        description: Requested a single plugin to install.
+        description: Requested a single plugin's info.
         required: true
       responses:
         '200':
@@ -1889,6 +2224,47 @@ paths:
             schema:
               $ref: '#/components/schemas/RequestPluginsSettingsSave'
         description: Requested a plugins settings be updated.
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseSuccess'
+          description: Successful request; Returns success status
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+          description: Bad request; Check `messages` for any validation errors
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEndpoint'
+          description: Bad request; Requested endpoint not found
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadMethod'
+          description: Bad request; Requested method is not allowed
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+          description: Internal error; Check `error` for exception
+  /plugins/settings/reset:
+    post:
+      description: Reset the settings of a single plugin.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestPluginsSettingsReset'
+        description: Requested a plugins settings be reset.
         required: true
       responses:
         '200':
@@ -2558,6 +2934,245 @@ paths:
               schema:
                 $ref: '#/components/schemas/InternalError'
           description: Internal error; Check `error` for exception
+  /settings/libraries:
+    get:
+      description: Returns a list of all libraries.
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsLibrariesList'
+          description: 'Sample response: Returns a list of all libraries.'
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+          description: Bad request; Check `messages` for any validation errors
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEndpoint'
+          description: Bad request; Requested endpoint not found
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadMethod'
+          description: Bad request; Requested method is not allowed
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+          description: Internal error; Check `error` for exception
+  /settings/library/read:
+    post:
+      description: Read the configuration of one library
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestLibraryById'
+        description: The ID of the library
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsLibraryConfigReadAndWrite'
+          description: 'Sample response: Returns the remote installation link configuration.'
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+          description: Bad request; Check `messages` for any validation errors
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEndpoint'
+          description: Bad request; Requested endpoint not found
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadMethod'
+          description: Bad request; Requested method is not allowed
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+          description: Internal error; Check `error` for exception
+  /settings/library/write:
+    post:
+      description: Write the configuration of one library
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettingsLibraryConfigReadAndWrite'
+        description: Requested a dictionary of settings to save.
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseSuccess'
+          description: Successful request; Returns success status
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+          description: Bad request; Check `messages` for any validation errors
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEndpoint'
+          description: Bad request; Requested endpoint not found
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadMethod'
+          description: Bad request; Requested method is not allowed
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+          description: Internal error; Check `error` for exception
+  /settings/library/remove:
+    delete:
+      description: Remove a library
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestLibraryById'
+        description: Requested a library to remove.
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseSuccess'
+          description: Successful request; Returns success status
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+          description: Bad request; Check `messages` for any validation errors
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEndpoint'
+          description: Bad request; Requested endpoint not found
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadMethod'
+          description: Bad request; Requested method is not allowed
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+          description: Internal error; Check `error` for exception
+  /settings/library/export:
+    post:
+      description: Export the plugin configuration of one library
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestLibraryById'
+        description: The ID of the library
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsLibraryPluginConfigExport'
+          description: 'Sample response: Returns the remote installation link configuration.'
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+          description: Bad request; Check `messages` for any validation errors
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEndpoint'
+          description: Bad request; Requested endpoint not found
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadMethod'
+          description: Bad request; Requested method is not allowed
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+          description: Internal error; Check `error` for exception
+  /settings/library/import:
+    post:
+      description: Import the configuration of one library
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettingsLibraryPluginConfigImport'
+        description: Requested a dictionary of settings to save.
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseSuccess'
+          description: Successful request; Returns success status
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+          description: Bad request; Check `messages` for any validation errors
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEndpoint'
+          description: Bad request; Requested endpoint not found
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadMethod'
+          description: Bad request; Requested method is not allowed
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+          description: Internal error; Check `error` for exception
   /upload/pending/file:
     post:
       description: Returns a list of pending tasks.
@@ -2797,6 +3412,40 @@ paths:
               $ref: '#/components/schemas/RequestWorkerById'
         description: Requested a worker be terminated by its ID.
         required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseSuccess'
+          description: Successful request; Returns success status
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequest'
+          description: Bad request; Check `messages` for any validation errors
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadEndpoint'
+          description: Bad request; Requested endpoint not found
+        '405':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadMethod'
+          description: Bad request; Requested method is not allowed
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+          description: Internal error; Check `error` for exception
+  /workers/worker/terminate/all:
+    delete:
+      description: Terminate all workers.
       responses:
         '200':
           content:

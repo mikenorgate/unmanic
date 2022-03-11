@@ -40,80 +40,56 @@ class FileMove(PluginType):
     Runner function - configures additional postprocessor file movements during the postprocessor stage of a task.
 
     The 'data' object argument includes:
-        source_data             - Dictionary containing data pertaining to the original source file.
-        remove_source_file      - Boolean, should Unmanic remove the original source file after all copy operations are complete.
-        copy_file               - Boolean, should Unmanic run a copy operation with the returned data variables.
-        file_in                 - The converted cache file to be copied by the postprocessor.
-        file_out                - The destination file that the file will be copied to.
+        library_id              - Integer, the library that the current task is associated with.
+        source_data             - Dictionary, data pertaining to the original source file.
+        remove_source_file      - Boolean, should Unmanic remove the original source file after all copy operations are complete. (default: 'True' if file name has changed)
+        copy_file               - Boolean, should Unmanic run a copy operation with the returned data variables. (default: 'False')
+        file_in                 - String, the converted cache file to be copied by the postprocessor.
+        file_out                - String, the destination file that the file will be copied to.
+        run_default_file_copy   - Boolean, should Unmanic run the default post-process file movement. (default: 'True')
 
     :param data:
     :return:
     """
     data_schema = {
-        "source_data":        {
+        "library_id":            {
+            "required": True,
+            "type":     int,
+        },
+        "source_data":           {
             "required": True,
             "type":     dict,
         },
-        "remove_source_file": {
+        "remove_source_file":    {
             "required": True,
             "type":     bool,
         },
-        "copy_file":          {
+        "copy_file":             {
             "required": True,
             "type":     bool,
         },
-        "file_in":            {
+        "file_in":               {
             "required": True,
             "type":     str,
         },
-        "file_out":           {
+        "file_out":              {
             "required": True,
             "type":     str,
+        },
+        "run_default_file_copy": {
+            "required": True,
+            "type":     bool,
         },
     }
     test_data = {
-        'copy_file':          True,
-        'file_in':            '/tmp/unmanic/unmanic_file_conversion-1616581079.6339643/TEST_FILE-1616581079.633973.mkv',
-        'file_out':           '/library/TEST_FILE.mkv',
-        'remove_source_file': True,
-        'source_data':        {
+        'library_id':            1,
+        'copy_file':             True,
+        'file_in':               '/tmp/unmanic/unmanic_file_conversion-1616581079.6339643/TEST_FILE-1616581079.633973.mkv',
+        'file_out':              '/library/TEST_FILE.mkv',
+        'remove_source_file':    True,
+        'run_default_file_copy': True,
+        'source_data':           {
             'abspath':          '/library/TEST_FILE.mkv',
             'basename':         'TEST_FILE.mp4',
-            'bit_rate':         '2753870',
-            'duration':         '81.951667',
-            'format_long_name': '',
-            'format_name':      'mov,mp4,m4a,3gp,3g2,mj2',
-            'id':               1,
-            'size':             '28210534',
-            'streams':          [
-                {
-                    'avg_frame_rate':  '2997/100',
-                    'bit_rate':        '2533754',
-                    'channel_layout':  '',
-                    'channels':        '',
-                    'codec_long_name': 'unknown',
-                    'codec_type':      'video',
-                    'coded_height':    '720',
-                    'coded_width':     '1280',
-                    'duration':        '81.748415',
-                    'height':          '720',
-                    'id':              1,
-                    'width':           '1280'
-                },
-                {
-                    'avg_frame_rate':  '0/0',
-                    'bit_rate':        '224000',
-                    'channel_layout':  '5.1(side)',
-                    'channels':        '6',
-                    'codec_long_name': 'unknown',
-                    'codec_type':      'audio',
-                    'coded_height':    '',
-                    'coded_width':     '',
-                    'duration':        '81.952000',
-                    'height':          '',
-                    'id':              2,
-                    'width':           ''
-                }
-            ]
         }
     }

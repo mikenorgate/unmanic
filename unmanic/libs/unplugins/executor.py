@@ -38,7 +38,7 @@ import sys
 
 from . import plugin_types
 from unmanic.libs import unlogger, common
-from ..unmodels.pluginflow import PluginFlow
+from ..unmodels import LibraryPluginFlow
 
 
 class PluginExecutor(object):
@@ -87,27 +87,6 @@ class PluginExecutor(object):
         :return:
         """
         return os.path.join(self.plugins_directory, plugin_id)
-
-    def __get_enabled_plugins(self, plugin_type=None):
-        """
-        Returns a list of enabled plugins
-
-        :return:
-        """
-        from unmanic.libs.plugins import PluginsHandler
-        plugin_handler = PluginsHandler()
-        order = [
-            {
-                "model":  PluginFlow,
-                "column": 'position',
-                "dir":    'asc',
-            },
-            {
-                "column": 'name',
-                "dir":    'asc',
-            },
-        ]
-        return plugin_handler.get_plugin_list_filtered_and_sorted(order=order, enabled=True, plugin_type=plugin_type)
 
     @staticmethod
     def __include_plugin_site_packages(path):
@@ -174,7 +153,7 @@ class PluginExecutor(object):
         """
         # Set the module name
         module_name = '{}.plugin'.format(plugin_id)
-        #self._log("Reloading module '{}'".format(module_name), level="debug")
+        # self._log("Reloading module '{}'".format(module_name), level="debug")
 
         if module_name in sys.modules:
             # Get all submodules
@@ -276,7 +255,7 @@ class PluginExecutor(object):
                           level="exception")
 
             del runner
-            #gc.collect()
+            # gc.collect()
 
         return run_successfully
 
@@ -355,11 +334,12 @@ class PluginExecutor(object):
         # Return runners
         return plugin_data
 
-    def get_plugin_settings(self, plugin_id):
+    def get_plugin_settings(self, plugin_id, library_id=None):
         """
         Returns a dictionary of a given plugin's settings
 
         :param plugin_id:
+        :param library_id:
         :return:
         """
         # Get the path for this plugin
@@ -374,18 +354,18 @@ class PluginExecutor(object):
 
         try:
             # Settings plugin_settings
-            plugin_settings = plugin_module.Settings()
+            plugin_settings = plugin_module.Settings(library_id=library_id)
 
             all_plugin_settings = copy.deepcopy(plugin_settings.get_setting())
             plugin_form_settings = copy.deepcopy(plugin_settings.get_form_settings())
         except Exception as e:
-            self._log(str(e), level='exception')
+            self._log("Exception while fetching settings for plugin '{}'".format(plugin_id), str(e), level='exception')
             all_plugin_settings = {}
             plugin_form_settings = {}
 
         return all_plugin_settings, plugin_form_settings
 
-    def save_plugin_settings(self, plugin_id, settings):
+    def save_plugin_settings(self, plugin_id, settings, library_id=None):
         """
         Saves a collection of a given plugin's settings.
         Returns a boolean result for the overall success
@@ -393,6 +373,7 @@ class PluginExecutor(object):
 
         :param plugin_id:
         :param settings:
+        :param library_id:
         :return:
         """
         # Get the path for this plugin
@@ -402,7 +383,7 @@ class PluginExecutor(object):
         plugin_module = self.__load_plugin_module(plugin_id, plugin_path)
 
         try:
-            plugin_settings = plugin_module.Settings()
+            plugin_settings = plugin_module.Settings(library_id=library_id)
 
             save_result = True
             for key in settings:
@@ -417,7 +398,29 @@ class PluginExecutor(object):
 
             return save_result
         except Exception as e:
+            self._log("Exception while saving settings for plugin '{}'".format(plugin_id), str(e), level='exception')
             self._log(str(e), level='exception')
+            return False
+
+    def reset_plugin_settings(self, plugin_id, library_id=None):
+        """
+        Reset a plugin settings by removing the config file
+
+        :param plugin_id:
+        :param library_id:
+        :return:
+        """
+        # Get the path for this plugin
+        plugin_path = self.__get_plugin_directory(plugin_id)
+
+        # Load this plugin module
+        plugin_module = self.__load_plugin_module(plugin_id, plugin_path)
+
+        try:
+            plugin_settings = plugin_module.Settings(library_id=library_id)
+            return plugin_settings.reset_settings_to_defaults()
+        except Exception as e:
+            self._log("Exception while resetting settings for plugin '{}'".format(plugin_id), str(e), level='exception')
             return False
 
     def get_plugin_changelog(self, plugin_id):

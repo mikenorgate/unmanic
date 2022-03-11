@@ -37,7 +37,8 @@ from unmanic.webserver.api_v2.base_api_handler import BaseApiHandler, BaseApiErr
 from unmanic.webserver.api_v2.schema.schemas import PluginFlowResultsSchema, PluginReposListResultsSchema, \
     PluginTypesResultsSchema, PluginsDataPanelTypesDataSchema, PluginsDataSchema, PluginsInfoResultsSchema, \
     PluginsInstallableResultsSchema, RequestPluginsByIdSchema, RequestPluginsFlowByPluginTypeSchema, \
-    RequestPluginsInfoSchema, RequestPluginsSettingsSaveSchema, RequestPluginsTableDataSchema, \
+    RequestPluginsInfoSchema, RequestPluginsSettingsResetSchema, RequestPluginsSettingsSaveSchema, \
+    RequestPluginsTableDataSchema, \
     RequestSavingPluginsFlowByPluginTypeSchema, RequestTableUpdateByIdList, RequestUpdatePluginReposListSchema
 from unmanic.webserver.helpers import plugins
 
@@ -83,6 +84,11 @@ class ApiPluginsHandler(BaseApiHandler):
             "path_pattern":      r"/plugins/settings/update",
             "supported_methods": ["POST"],
             "call_method":       "update_plugin_settings",
+        },
+        {
+            "path_pattern":      r"/plugins/settings/reset",
+            "supported_methods": ["POST"],
+            "call_method":       "reset_plugin_settings",
         },
         {
             "path_pattern":      r"/plugins/installable",
@@ -216,7 +222,7 @@ class ApiPluginsHandler(BaseApiHandler):
         """
         Plugins - enable
         ---
-        description: Enable a list of plugins.
+        description: DEPRECATED! Enable a list of plugins.
         requestBody:
             description: Requested list of plugins to enable.
             required: True
@@ -257,15 +263,7 @@ class ApiPluginsHandler(BaseApiHandler):
                             InternalErrorSchema
         """
         try:
-            json_request = self.read_json_request(RequestTableUpdateByIdList())
-
-            if not plugins.enable_plugins(json_request.get('id_list', []), self.unmanic_data_queues.get('frontend_messages')):
-                self.set_status(self.STATUS_ERROR_INTERNAL, reason="Failed to enable the plugins by their IDs")
-                self.write_error()
-                return
-
-            self.write_success()
-            return
+            raise Exception('Endpoint is deprecated. Plugins are now enabled by assigning them to a library')
         except BaseApiError as bae:
             tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
             return
@@ -277,7 +275,7 @@ class ApiPluginsHandler(BaseApiHandler):
         """
         Plugins - disable
         ---
-        description: Disable a list of plugins.
+        description: DEPRECATED! Disable a list of plugins.
         requestBody:
             description: Requested list of plugins to disable.
             required: True
@@ -318,15 +316,7 @@ class ApiPluginsHandler(BaseApiHandler):
                             InternalErrorSchema
         """
         try:
-            json_request = self.read_json_request(RequestTableUpdateByIdList())
-
-            if not plugins.disable_plugins(json_request.get('id_list', [])):
-                self.set_status(self.STATUS_ERROR_INTERNAL, reason="Failed to disable the plugins by their IDs")
-                self.write_error()
-                return
-
-            self.write_success()
-            return
+            raise Exception('Endpoint is deprecated. Plugins are now enabled by assigning them to a library')
         except BaseApiError as bae:
             tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
             return
@@ -338,7 +328,7 @@ class ApiPluginsHandler(BaseApiHandler):
         """
         Plugins - update
         ---
-        description: Update a list of plugins.
+        description: Update a list of plugins given their DB table IDs.
         requestBody:
             description: Requested list of plugins to update.
             required: True
@@ -399,7 +389,7 @@ class ApiPluginsHandler(BaseApiHandler):
         """
         Plugins - remove
         ---
-        description: Remove a list of plugins.
+        description: Remove a list of plugins given their DB table IDs.
         requestBody:
             description: Requested list of plugins to remove.
             required: True
@@ -462,7 +452,7 @@ class ApiPluginsHandler(BaseApiHandler):
         ---
         description: Returns a the metadata and settings of a requested plugin.
         requestBody:
-            description: Requested a single plugin to install.
+            description: Requested a single plugin's info.
             required: True
             content:
                 application/json:
@@ -505,8 +495,11 @@ class ApiPluginsHandler(BaseApiHandler):
 
             plugin_id = json_request.get('plugin_id')
             prefer_local = json_request.get('prefer_local')
+            library_id = json_request.get('library_id')
 
-            plugins_info = plugins.prepare_plugin_info_and_settings(plugin_id, prefer_local)
+            plugins_info = plugins.prepare_plugin_info_and_settings(plugin_id,
+                                                                    prefer_local=prefer_local,
+                                                                    library_id=library_id)
 
             response = self.build_response(
                 PluginsInfoResultsSchema(),
@@ -520,7 +513,7 @@ class ApiPluginsHandler(BaseApiHandler):
                     "version":     plugins_info.get('version'),
                     "changelog":   plugins_info.get('changelog'),
                     "status":      plugins_info.get('status'),
-                    "settings":    plugins_info.get('settings')
+                    "settings":    plugins_info.get('settings'),
                 }
             )
             self.write_success(response)
@@ -579,8 +572,76 @@ class ApiPluginsHandler(BaseApiHandler):
         try:
             json_request = self.read_json_request(RequestPluginsSettingsSaveSchema())
 
-            if not plugins.update_plugin_settings(json_request.get('plugin_id'), json_request.get('settings')):
+            plugin_id = json_request.get('plugin_id')
+            settings = json_request.get('settings')
+            library_id = json_request.get('library_id')
+
+            if not plugins.update_plugin_settings(plugin_id, settings, library_id=library_id):
                 self.set_status(self.STATUS_ERROR_INTERNAL, reason="Failed to save plugins settings")
+                self.write_error()
+                return
+
+            self.write_success()
+            return
+        except BaseApiError as bae:
+            tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
+            return
+        except Exception as e:
+            self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
+            self.write_error()
+
+    def reset_plugin_settings(self):
+        """
+        Plugins - Reset the settings of a single plugin
+        ---
+        description: Reset the settings of a single plugin.
+        requestBody:
+            description: Requested a plugins settings be reset.
+            required: True
+            content:
+                application/json:
+                    schema:
+                        RequestPluginsSettingsResetSchema
+        responses:
+            200:
+                description: 'Successful request; Returns success status'
+                content:
+                    application/json:
+                        schema:
+                            BaseSuccessSchema
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
+        try:
+            json_request = self.read_json_request(RequestPluginsSettingsResetSchema())
+
+            plugin_id = json_request.get('plugin_id')
+            library_id = json_request.get('library_id')
+
+            if not plugins.reset_plugin_settings(plugin_id, library_id=library_id):
+                self.set_status(self.STATUS_ERROR_INTERNAL, reason="Failed to reset plugins settings")
                 self.write_error()
                 return
 
@@ -810,7 +871,8 @@ class ApiPluginsHandler(BaseApiHandler):
         try:
             json_request = self.read_json_request(RequestPluginsFlowByPluginTypeSchema())
 
-            results = plugins.get_enabled_plugin_flows_for_plugin_type(json_request.get('plugin_type'))
+            results = plugins.get_enabled_plugin_flows_for_plugin_type(json_request.get('plugin_type'),
+                                                                       json_request.get('library_id'))
             response = self.build_response(
                 PluginFlowResultsSchema(),
                 {
@@ -874,6 +936,7 @@ class ApiPluginsHandler(BaseApiHandler):
             json_request = self.read_json_request(RequestSavingPluginsFlowByPluginTypeSchema())
 
             if not plugins.save_enabled_plugin_flows_for_plugin_type(json_request.get('plugin_type'),
+                                                                     json_request.get('library_id'),
                                                                      json_request.get('plugin_flow')):
                 self.set_status(self.STATUS_ERROR_INTERNAL, reason="Failed to update plugin flow by type")
                 self.write_error()

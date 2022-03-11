@@ -54,14 +54,14 @@ class Session(object, metaclass=SingletonType):
     level = 5
 
     """
-    non supporter plugin count
+    non supporter library count
     """
-    plugin_count = 20
+    library_count = 2
 
     """
     non supporter linked installations count
     """
-    link_count = 1
+    link_count = 5
 
     """
     picture_uri - The user avatar
@@ -285,6 +285,22 @@ class Session(object, metaclass=SingletonType):
         :return:
         """
         return "{0}/patreon-login".format(self.get_site_url())
+
+    def get_github_login_url(self):
+        """
+        Fetch the GitHub client ID
+
+        :return:
+        """
+        return "{0}/github-login".format(self.get_site_url())
+
+    def get_discord_login_url(self):
+        """
+        Fetch the Discord client ID
+
+        :return:
+        """
+        return "{0}/discord-login".format(self.get_site_url())
 
     def get_patreon_sponsor_page(self):
         """

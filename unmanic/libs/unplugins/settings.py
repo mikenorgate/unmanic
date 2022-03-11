@@ -37,7 +37,7 @@ from unmanic import config
 from unmanic.libs.singleton import SingletonType
 
 
-class PluginSettings(object, metaclass=SingletonType):
+class PluginSettings(object):
     """
     A dictionary of settings accessible to the Plugin class and able
     to be configured by users from within the Unmanic WebUI.
@@ -58,7 +58,16 @@ class PluginSettings(object, metaclass=SingletonType):
     """
     settings_configured = None
 
-    def __get_plugin_settings_file(self):
+    """
+    The library ID that we are fetching settings for.
+    
+    """
+    library_id = None
+
+    def __init__(self, *args, **kwargs):
+        self.library_id = kwargs.get('library_id')
+
+    def __get_plugin_settings_file(self, force_library_settings=False):
         plugin_directory = self.get_plugin_directory()
         profile_directory = self.get_profile_directory()
         # Temp code to migrate settings to userdata
@@ -70,7 +79,14 @@ class PluginSettings(object, metaclass=SingletonType):
                     os.path.join(plugin_directory, 'settings.json'),
                     os.path.join(profile_directory, 'settings.json')
                 )
-        return os.path.join(profile_directory, 'settings.json')
+        # If provided with a library ID, then the settings file will be different
+        plugin_settings_file = os.path.join(profile_directory, 'settings.json')
+        if self.library_id:
+            plugin_settings_file = os.path.join(profile_directory, 'settings.{}.json'.format(self.library_id))
+            if not os.path.exists(plugin_settings_file) and not force_library_settings:
+                # If the library file does not yet exist, then resort to using the default settings file
+                plugin_settings_file = os.path.join(profile_directory, 'settings.json')
+        return plugin_settings_file
 
     def __export_configured_settings(self):
         """
@@ -78,7 +94,7 @@ class PluginSettings(object, metaclass=SingletonType):
 
         :return:
         """
-        plugin_settings_file = self.__get_plugin_settings_file()
+        plugin_settings_file = self.__get_plugin_settings_file(force_library_settings=True)
 
         with open(plugin_settings_file, 'w') as f:
             json.dump(self.settings_configured, f, indent=2)
@@ -106,6 +122,27 @@ class PluginSettings(object, metaclass=SingletonType):
         for key in self.settings:
             if key in plugin_settings:
                 self.settings_configured[key] = plugin_settings.get(key)
+
+    def reset_settings_to_defaults(self):
+        """
+        Remove all currently configured settings by deleting the settings.json file
+
+        :return:
+        """
+        plugin_settings_file = self.__get_plugin_settings_file()
+
+        # If the settings file returned is the global settings file and this was called on a library config,
+        # do not reset the config.
+        if self.library_id is not None and os.path.basename(plugin_settings_file) == 'settings.json':
+            return False
+
+        # if the file does not yet exist, create it
+        if os.path.exists(plugin_settings_file):
+            os.remove(plugin_settings_file)
+
+        if not os.path.exists(plugin_settings_file):
+            return True
+        return False
 
     def get_plugin_directory(self):
         """

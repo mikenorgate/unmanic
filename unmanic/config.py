@@ -69,7 +69,6 @@ class Config(object, metaclass=SingletonType):
         self.follow_symlinks = True
         self.concurrent_file_testers = 2
         self.run_full_scan_on_start = False
-        self.enable_inotify = False
         self.clear_pending_tasks_on_restart = True
 
         # Worker settings
@@ -85,6 +84,12 @@ class Config(object, metaclass=SingletonType):
         # Import env variables and override all previous settings.
         self.__import_settings_from_env()
 
+        # Import Unmanic path settings from command params
+        if kwargs.get('unmanic_path'):
+            self.set_config_item('config_path', os.path.join(kwargs.get('unmanic_path'), 'config'), save_settings=False)
+            self.set_config_item('plugins_path', os.path.join(kwargs.get('unmanic_path'), 'plugins'), save_settings=False)
+            self.set_config_item('userdata_path', os.path.join(kwargs.get('unmanic_path'), 'userdata'), save_settings=False)
+
         # Finally, re-read config from file and override all previous settings.
         self.__import_settings_from_file(config_path)
 
@@ -92,11 +97,7 @@ class Config(object, metaclass=SingletonType):
         if config_path:
             self.set_config_item('config_path', config_path, save_settings=False)
 
-        if kwargs.get('unmanic_path'):
-            self.set_config_item('config_path', os.path.join(kwargs.get('unmanic_path'), 'config'), save_settings=False)
-            self.set_config_item('plugins_path', os.path.join(kwargs.get('unmanic_path'), 'plugins'), save_settings=False)
-            self.set_config_item('userdata_path', os.path.join(kwargs.get('unmanic_path'), 'userdata'), save_settings=False)
-
+        # Overwrite all other settings passed from command params
         if kwargs.get('port'):
             self.set_config_item('ui_port', kwargs.get('port'), save_settings=False)
 
@@ -329,14 +330,6 @@ class Config(object, metaclass=SingletonType):
         else:
             unmanic_logging.disable_debugging()
         self.debugging = value
-
-    def get_enable_inotify(self):
-        """
-        Get setting - enable_inotify
-
-        :return:
-        """
-        return self.enable_inotify
 
     def get_library_path(self):
         """

@@ -29,6 +29,7 @@
            OR OTHER DEALINGS IN THE SOFTWARE.
 
 """
+import random
 import time
 import requests
 
@@ -79,9 +80,14 @@ class Session(object, metaclass=SingletonType):
     email = ''
 
     """
-    created - The timestamp when the session was last checked
+    created - The timestamp when the session was created
     """
     created = None
+
+    """
+    last_check - The timestamp when the session was last checked
+    """
+    last_check = None
 
     """
     uuid - This installation's UUID
@@ -97,6 +103,17 @@ class Session(object, metaclass=SingletonType):
         message = common.format_message(message, message2)
         getattr(self.logger, level)(message)
 
+    def __created_older_than_x_days(self, days=1):
+        # (86400 = 24 hours)
+        seconds = (days * 86400)
+        # Get session expiration time
+        time_now = time.time()
+        time_when_session_expires = self.created + seconds
+        # Check that the time create is less than 24 hours old
+        if time_now < time_when_session_expires:
+            return False
+        return True
+
     def __check_session_valid(self):
         """
         Ensure that the session is valid.
@@ -107,13 +124,17 @@ class Session(object, metaclass=SingletonType):
         """
         return True
 
+        # Last checked less than a min ago... just keep the current session.
+        # This check is only to prevent spamming requests when the site API is unreachable
+        # Only check in every 10 mins (600s) minimum. Never ignore a checkin for more than 15 mins (900s)
+        if self.last_check and 900 > (time.time() - self.last_check) < 600:
+            return True
+        # If the session has never been created, return false
         if not self.created:
             return False
-        # Get session expiration time
-        time_now = time.time()
-        time_when_session_expires = self.created + 86400
-        # Check that the time create is less than 24 hours old
-        if time_now < time_when_session_expires:
+        # Check if the time the session was created is less than 1 day old
+        if not self.__created_older_than_x_days(days=1):
+            # Only try to recreate the session once a day
             return True
         self._log("Session no longer valid ", level="debug")
         return False
@@ -124,10 +145,69 @@ class Session(object, metaclass=SingletonType):
 
         :return:
         """
-        self.created = time.time()
+        # Get the time now in seconds
+        seconds = time.time()
+        # Create a seconds offset of some random number between 300 (5 mins) and 900 (15 mins)
+        seconds_offset = random.randint(300, 900 - 1)
+        # Set the created flag with the seconds variable plus a random offset to avoid people joining
+        #   together to register if the site goes down
+        self.created = (seconds + seconds_offset)
+        # Print only the accurate update time in debug log
         from datetime import datetime
-        created = datetime.fromtimestamp(self.created)
+        created = datetime.fromtimestamp(seconds)
         self._log("Updated session at ", str(created), level="debug")
+
+    def __fetch_installation_data(self):
+        """
+        Fetch installation data from DB
+
+        :return:
+        """
+        # Fetch installation
+        db_installation = Installation()
+        try:
+            # Fetch a single row (get() will raise DoesNotExist exception if no results are found)
+            current_installation = db_installation.select().order_by(Installation.id.asc()).limit(1).get()
+        except Exception as e:
+            # Create settings (defaults will be applied)
+            self._log("Unmanic session does not yet exist... Creating.", level="debug")
+            db_installation.delete().execute()
+            current_installation = db_installation.create()
+
+        self.uuid = str(current_installation.uuid)
+        self.level = int(current_installation.level)
+        self.picture_uri = str(current_installation.picture_uri)
+        self.name = str(current_installation.name)
+        self.email = str(current_installation.email)
+        self.created = current_installation.created
+
+    def __store_installation_data(self):
+        """
+        Store installation data in DB to persist reboot
+
+        :return:
+        """
+        if self.uuid:
+            db_installation = Installation.get_or_none(uuid=self.uuid)
+            db_installation.level = self.level
+            db_installation.picture_uri = self.picture_uri
+            db_installation.name = self.name
+            db_installation.email = self.email
+            db_installation.created = self.created
+            db_installation.save()
+
+    def _reset_session_installation_data(self):
+        """
+        Reset stored session data
+
+        :return:
+        """
+        self.level = 0
+        self.picture_uri = ''
+        self.name = ''
+        self.email = ''
+        self.created = time.time()
+        self.__store_installation_data()
 
     def get_installation_uuid(self):
         """
@@ -137,18 +217,7 @@ class Session(object, metaclass=SingletonType):
         :return:
         """
         if not self.uuid:
-            # Fetch installation
-            db_installation = Installation()
-            try:
-                # Fetch a single row (get() will raise DoesNotExist exception if no results are found)
-                current_installation = db_installation.select().order_by(Installation.id.asc()).limit(1).get()
-            except Exception as e:
-                # Create settings (defaults will be applied)
-                self._log("Unmanic session does not yet exist... Creating.", level="debug")
-                db_installation.delete().execute()
-                current_installation = db_installation.create()
-
-            self.uuid = str(current_installation.uuid)
+            self.__fetch_installation_data()
         return self.uuid
 
     def get_site_url(self):
@@ -157,7 +226,7 @@ class Session(object, metaclass=SingletonType):
         :return:
         """
         api_proto = "https"
-        api_domain = "unmanic.app"
+        api_domain = "api.unmanic.app"
         return "{0}://{1}".format(api_proto, api_domain)
 
     def set_full_api_url(self, api_version, api_path):
@@ -215,8 +284,15 @@ class Session(object, metaclass=SingletonType):
         if not force and self.__check_session_valid():
             return True
 
+        # Set now as the last time this was run (before it was actually run
+        self.last_check = time.time()
+
+        # Update the session
         settings = config.Config()
         try:
+            # Fetch the installation data prior to running a session update
+            self.__fetch_installation_data()
+
             # Build post data
             from unmanic.libs.system import System
             system = System()
@@ -242,7 +318,7 @@ class Session(object, metaclass=SingletonType):
                 registration_data = registration_response.get("data")
 
                 # Set level from response data (default back to 0)
-                self.level = registration_data.get("level", 0)
+                self.level = int(registration_data.get("level", 0))
 
                 # Get user data from response data
                 user_data = registration_data.get('user')
@@ -261,7 +337,15 @@ class Session(object, metaclass=SingletonType):
 
                 self.__update_created_timestamp()
 
+                # Persist session in DB
+                self.__store_installation_data()
+
                 return True
+
+            # Allow an extension for the session for 7 days without an internet connection
+            if self.__created_older_than_x_days(days=7):
+                # Reset the session - Unmanic should phone home once every 7 days
+                self._reset_session_installation_data()
             return False
         except Exception as e:
             self._log("Exception while registering Unmanic.", str(e), level="debug")

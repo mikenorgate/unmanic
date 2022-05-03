@@ -44,7 +44,6 @@ from unmanic.libs.postprocessor import PostProcessor
 from unmanic.libs.taskhandler import TaskHandler
 from unmanic.libs.uiserver import FrontendPushMessages, UIServer
 from unmanic.libs.foreman import Foreman
-from unmanic.libs.unplugins.pluginscli import PluginsCLI
 
 unmanic_logging = unlogger.UnmanicLogger.__call__()
 main_logger = unmanic_logging.get_logger()
@@ -56,9 +55,9 @@ def init_db(config_path):
 
     # Set database connection settings
     database_settings = {
-        "TYPE":                       "SQLITE",
-        "FILE":                       os.path.join(config_path, 'unmanic.db'),
-        "MIGRATIONS_DIR":             os.path.join(app_dir, 'migrations_v1'),
+        "TYPE": "SQLITE",
+        "FILE": os.path.join(config_path, 'unmanic.db'),
+        "MIGRATIONS_DIR": os.path.join(app_dir, 'migrations_v1'),
         "MIGRATIONS_HISTORY_VERSION": 'v1',
     }
 
@@ -93,7 +92,7 @@ class Service:
         handler.daemon = True
         handler.start()
         self.threads.append({
-            'name':   'TaskHandler',
+            'name': 'TaskHandler',
             'thread': handler
         })
         return handler
@@ -104,7 +103,7 @@ class Service:
         postprocessor.daemon = True
         postprocessor.start()
         self.threads.append({
-            'name':   'PostProcessor',
+            'name': 'PostProcessor',
             'thread': postprocessor
         })
         return postprocessor
@@ -115,7 +114,7 @@ class Service:
         foreman.daemon = True
         foreman.start()
         self.threads.append({
-            'name':   'Foreman',
+            'name': 'Foreman',
             'thread': foreman
         })
         return foreman
@@ -126,7 +125,7 @@ class Service:
         library_scanner_manager.daemon = True
         library_scanner_manager.start()
         self.threads.append({
-            'name':   'LibraryScannerManager',
+            'name': 'LibraryScannerManager',
             'thread': library_scanner_manager
         })
         return library_scanner_manager
@@ -138,7 +137,7 @@ class Service:
             event_monitor_manager.daemon = True
             event_monitor_manager.start()
             self.threads.append({
-                'name':   'EventMonitorManager',
+                'name': 'EventMonitorManager',
                 'thread': event_monitor_manager
             })
             return event_monitor_manager
@@ -151,7 +150,7 @@ class Service:
         uiserver.daemon = True
         uiserver.start()
         self.threads.append({
-            'name':   'UIServer',
+            'name': 'UIServer',
             'thread': uiserver
         })
         return uiserver
@@ -162,7 +161,7 @@ class Service:
         scheduled_tasks_manager.daemon = True
         scheduled_tasks_manager.start()
         self.threads.append({
-            'name':   'ScheduledTasksManager',
+            'name': 'ScheduledTasksManager',
             'thread': scheduled_tasks_manager
         })
         return scheduled_tasks_manager
@@ -173,19 +172,15 @@ class Service:
         s = session.Session()
         s.register_unmanic(s.get_installation_uuid())
 
-    def sig_handle(self, a, b):
-        main_logger.info("SIGTERM Received")
-        self.run_threads = False
-
     def start_threads(self, settings):
         # Create our data queues
         data_queues = {
             "library_scanner_triggers": queue.Queue(maxsize=1),
-            "scheduledtasks":           queue.Queue(),
-            "inotifytasks":             queue.Queue(),
-            "progress_reports":         queue.Queue(),
-            "frontend_messages":        FrontendPushMessages(),
-            "logging":                  unmanic_logging
+            "scheduledtasks": queue.Queue(),
+            "inotifytasks": queue.Queue(),
+            "progress_reports": queue.Queue(),
+            "frontend_messages": FrontendPushMessages(),
+            "logging": unmanic_logging
         }
 
         # Clear cache directory
@@ -232,6 +227,13 @@ class Service:
             main_logger.info("Thread {} has successfully stopped".format(thread['name']))
         self.threads = []
 
+    def sig_handle(self, signum, frame):
+        main_logger.info("Received {}".format(signum))
+        self.stop()
+
+    def stop(self):
+        self.run_threads = False
+
     def run(self):
         # Init the configuration
         settings = config.Config()
@@ -243,10 +245,17 @@ class Service:
         self.start_threads(settings)
 
         # Watch for the term signal
-        signal.signal(signal.SIGINT, self.sig_handle)
-        signal.signal(signal.SIGTERM, self.sig_handle)
-        while self.run_threads:
-            signal.pause()
+        if os.name == "nt":
+            while self.run_threads:
+                try:
+                    time.sleep(1)
+                except (KeyboardInterrupt, SystemExit) as e:
+                    break
+        else:
+            signal.signal(signal.SIGINT, self.sig_handle)
+            signal.signal(signal.SIGTERM, self.sig_handle)
+            while self.run_threads:
+                signal.pause()
 
         # Received term signal. Stop everything
         self.stop_threads()
@@ -283,6 +292,7 @@ def main():
         db_connection = init_db(settings.get_config_path())
 
         # Run the plugin manager CLI
+        from unmanic.libs.unplugins.pluginscli import PluginsCLI
         plugin_cli = PluginsCLI()
         plugin_cli.run()
 

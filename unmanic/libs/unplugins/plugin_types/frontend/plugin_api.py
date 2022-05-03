@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 
 """
-    unmanic.file_test.py
+    unmanic.plugin_api.py
 
     Written by:               Josh.5 <jsunnex@gmail.com>
-    Date:                     31 Mar 2021, (5:12 PM)
+    Date:                     05 Mar 2022, (11:38 PM)
 
     Copyright:
            Copyright (C) Josh Sunnex - All Rights Reserved
@@ -33,54 +33,58 @@
 from ..plugin_type_base import PluginType
 
 
-class FileTest(PluginType):
-    name = "Library Management - File test"
-    runner = "on_library_management_file_test"
+class PluginAPI(PluginType):
+    name = "Frontend - Plugin API"
+    runner = "render_plugin_api"
     runner_docstring = """
-    Runner function - enables additional actions during the library management file tests.
+    Runner function - provide a custom API endpoint managed by a plugin.
 
     The 'data' object argument includes:
-        library_id                      - The library that the current task is associated with
-        path                            - String containing the full path to the file being tested.
-        issues                          - List of currently found issues for not processing the file.
-        add_file_to_pending_tasks       - Boolean, is the file currently marked to be added to the queue for processing.
-        priority_score                  - Integer, an additional score that can be added to set the position of the new task in the task queue.
-        shared_info                     - Dictionary, information provided by previous plugin runners. This can be appended to for subsequent runners.
+        content_type                    - The content type to be set when writing back to the browser.
+        content                         - The content to print to the browser.
+        path                            - The path received after the '/unmanic/panel' path.
+        uri                             - The request uri.
+        query                           - The request query.
+        arguments                       - A dictionary of GET arguments received.
+        body                            - A dictionary of body arguments received.
 
     :param data:
     :return:
     """
     data_schema = {
-        "path":                      {
+        "content_type": {
             "required": True,
             "type":     str,
         },
-        "issues":                    {
+        "content":      {
             "required": True,
-            "type":     list,
+            "type":     dict,
         },
-        "add_file_to_pending_tasks": {
-            "required": True,
-            "type":     bool,
+        "path":         {
+            "required": False,
+            "type":     str,
         },
-        "priority_score":            {
-            "required": True,
-            "type":     int,
+        "uri":          {
+            "required": False,
+            "type":     str,
         },
-        "shared_info":               {
+        "query":        {
+            "required": False,
+            "type":     str,
+        },
+        "arguments":    {
+            "required": False,
+            "type":     dict,
+        },
+        "body":         {
             "required": False,
             "type":     dict,
         },
     }
     test_data = {
-        'path':                      '/library/TEST_FILE.mkv',
-        'issues':                    [
-            {
-                'id':      'format',
-                'message': "File is already in target format - '/library/TEST_FILE.mkv'"
-            }
-        ],
-        'add_file_to_pending_tasks': True,
-        'priority_score':            0,
-        'shared_info':               {},
+        'content_type': 'application/json',
+        'content':      {},
+        'path':         "/webhook",
+        'arguments':    {'param': [b'true'], 'foo': [b'ba']},
+        'body':         {'param': [b'true'], 'foo': [b'ba']},
     }

@@ -130,6 +130,24 @@ class RequestTableDataSchema(BaseSchema):
         example="items with this text in the value",
         load_default="",
     )
+    status = fields.Str(
+        required=False,
+        description="Filter on the status",
+        example="all",
+        load_default="all",
+    )
+    after = fields.DateTime(
+        required=False,
+        description="Filter entries since datetime",
+        example="2022-04-07 01:45",
+        allow_none=True,
+    )
+    before = fields.DateTime(
+        required=False,
+        description="Filter entries prior to datetime",
+        example="2022-04-07 01:55",
+        allow_none=True,
+    )
     order_by = fields.Str(
         required=False,
         description="Column to order results by",
@@ -175,6 +193,16 @@ class TableRecordsSuccessSchema(BaseSchema):
         required=False,
         description="Results",
         example=[],
+    )
+
+
+class RequestDatabaseItemByIdSchema(BaseSchema):
+    """Schema to request a single table item given its ID"""
+
+    id = fields.Int(
+        required=True,
+        description="The ID of the table item",
+        example=1,
     )
 
 
@@ -438,15 +466,23 @@ class RequestPendingTaskCreateSchema(BaseSchema):
 
     path = fields.Str(
         required=True,
+        description="The absolute path to a file",
         example="/library/TEST_FILE.mkv",
     )
     library_id = fields.Int(
         required=False,
+        description="The ID of the library to append this task to",
         example=1,
     )
     library_name = fields.Str(
         required=False,
+        description="The name of the library to append this task to",
         example='Default',
+    )
+    priority_score = fields.Int(
+        required=False,
+        description="Apply a priority score to the created task to either increase or decrease its position in the queue",
+        example=1000,
     )
 
 
@@ -953,17 +989,6 @@ class SettingsReadAndWriteSchema(BaseSchema):
             "schedule_full_scan_minutes": 1440,
             "follow_symlinks":            True,
             "run_full_scan_on_start":     False,
-            "number_of_workers":          1,
-            "worker_event_schedules":     [
-                {
-                    "repetition":          "weekday",
-                    "repetitionLabel":     "Every Weekday",
-                    "scheduleTime":        "23:00",
-                    "scheduleTask":        "resume",
-                    "scheduleTaskLabel":   "Resume all workers",
-                    "scheduleWorkerCount": 0
-                }
-            ],
             "cache_path":                 "/tmp/unmanic"
         },
     )
@@ -979,6 +1004,82 @@ class SettingsSystemConfigSchema(BaseSchema):
     )
 
 
+class WorkerEventScheduleResultsSchema(BaseSchema):
+    """Schema for worker status results"""
+
+    repetition = fields.Str(
+        required=True,
+        description="",
+        example="daily",
+    )
+    schedule_task = fields.Str(
+        required=True,
+        description="The type of task. ['count', 'pause', 'resume']",
+        example="count",
+    )
+    schedule_time = fields.Str(
+        required=True,
+        description="",
+        example="The time when the task should be executed on",
+    )
+    schedule_worker_count = fields.Int(
+        required=False,
+        description="The worker count to set (only valid if schedule_task is count)",
+        example=4,
+    )
+
+
+class SettingsWorkerGroupConfigSchema(BaseSchema):
+    """Schema to display the config of a single worker group"""
+
+    id = fields.Int(
+        required=True,
+        description="",
+        example=1,
+        allow_none=True,
+    )
+    locked = fields.Boolean(
+        required=True,
+        description="If the worker group is locked and cannot be deleted",
+        example=False,
+    )
+    name = fields.Str(
+        required=True,
+        description="The name of the worker group",
+        example="Default Group",
+    )
+    number_of_workers = fields.Int(
+        required=True,
+        description="The number of workers in this group",
+        example=3,
+    )
+    worker_event_schedules = fields.Nested(
+        WorkerEventScheduleResultsSchema,
+        required=True,
+        description="Any scheduled evenets for this worker group",
+        many=True,
+        validate=validate.Length(min=0),
+    )
+    tags = fields.List(
+        cls_or_instance=fields.Str,
+        required=True,
+        description="A list of tags associated with this worker",
+        example=['GPU', 'priority'],
+    )
+
+
+class WorkerGroupsListSchema(BaseSchema):
+    """Schema to list all worker groups"""
+
+    worker_groups = fields.Nested(
+        SettingsWorkerGroupConfigSchema,
+        required=True,
+        description="Results",
+        many=True,
+        validate=validate.Length(min=0),
+    )
+
+
 class RequestSettingsRemoteInstallationAddressValidationSchema(BaseSchema):
     """Schema to request validation of remote installation address"""
 
@@ -986,6 +1087,24 @@ class RequestSettingsRemoteInstallationAddressValidationSchema(BaseSchema):
         required=True,
         description="The address of the remote installation",
         example="192.168.1.2:8888",
+    )
+    auth = fields.Str(
+        required=False,
+        description="Authentication type",
+        example="Basic",
+        allow_none=True,
+    )
+    username = fields.Str(
+        required=False,
+        description="An optional username",
+        example="foo",
+        allow_none=True,
+    )
+    password = fields.Str(
+        required=False,
+        description="An optional password",
+        example="bar",
+        allow_none=True,
     )
 
 
@@ -1017,6 +1136,9 @@ class SettingsRemoteInstallationLinkConfigSchema(BaseSchema):
         description="The configuration for the remote installation link",
         example={
             "address":                         "10.0.0.2:8888",
+            "auth":                            "None",
+            "username":                        "",
+            "password":                        "",
             "available":                       True,
             "name":                            "API schema generated",
             "version":                         "0.1.3",
@@ -1057,6 +1179,12 @@ class LibraryResultsSchema(BaseSchema):
         description="If the library is locked and cannot be deleted",
         example=False,
     )
+    tags = fields.List(
+        cls_or_instance=fields.Str,
+        required=True,
+        description="A list of tags associated with this library",
+        example=['GPU', 'priority'],
+    )
 
 
 class SettingsLibrariesListSchema(BaseSchema):
@@ -1093,6 +1221,8 @@ class SettingsLibraryConfigReadAndWriteSchema(BaseSchema):
             "path":           "/library",
             "enable_scanner": False,
             "enable_inotify": False,
+            "priority_score": 0,
+            "tags":           [],
         },
     )
 
@@ -1165,6 +1295,8 @@ class SettingsLibraryPluginConfigExportSchema(BaseSchema):
             "path":           "/library",
             "enable_scanner": False,
             "enable_inotify": False,
+            "priority_score": 0,
+            "tags":           [],
         },
     )
 

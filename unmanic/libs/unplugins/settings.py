@@ -66,6 +66,12 @@ class PluginSettings(object):
 
     def __init__(self, *args, **kwargs):
         self.library_id = kwargs.get('library_id')
+        # If the given library is not None, ensure that it is a number
+        if self.library_id:
+            try:
+                self.library_id = int(self.library_id)
+            except ValueError:
+                raise Exception("Library ID needs to be an integer. You have provided '{}'".format(self.library_id))
 
     def __get_plugin_settings_file(self, force_library_settings=False):
         plugin_directory = self.get_plugin_directory()
@@ -108,7 +114,10 @@ class PluginSettings(object):
         plugin_settings_file = self.__get_plugin_settings_file()
 
         # Default the configured settings to the plugin defaults
-        self.settings_configured = self.settings
+        # Loop over the self.settings object to clone the keys/values
+        self.settings_configured = {}
+        for key in self.settings:
+            self.settings_configured[key] = self.settings[key]
 
         # if the file does not yet exist, create it
         if not os.path.exists(plugin_settings_file):
@@ -192,6 +201,9 @@ class PluginSettings(object):
         except json.decoder.JSONDecodeError:
             # If the import fails, then it will resort to defaults.
             # That is fine. Better than breaking the rest of the process
+            pass
+        except FileNotFoundError:
+            # If the settings file did not exist, then also resort to defaults.
             pass
 
         if key is None:

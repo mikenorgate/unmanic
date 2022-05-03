@@ -45,6 +45,29 @@ def get_home_dir():
     return home_dir
 
 
+def get_default_root_path():
+    root = os.path.join(os.sep)
+    if os.name == "nt":
+        root = os.path.join('c:', os.sep)
+    return root
+
+
+def get_default_library_path():
+    library_path = os.path.join(get_default_root_path(), 'library')
+    # Windows set the default library directory into %USERPROFILE%\Documents
+    if os.name == "nt":
+        library_path = os.path.join(os.path.expandvars(r'%USERPROFILE%'), 'Documents')
+    return library_path
+
+
+def get_default_cache_path():
+    cache_path = os.path.join(get_default_root_path(), 'tmp', 'unmanic')
+    # Windows set the default temp directory into %LOCALAPPDATA%\Temp\Unmanic
+    if os.name == "nt":
+        cache_path = os.path.join(os.path.expandvars(r'%LOCALAPPDATA%\Temp'), 'Unmanic')
+    return cache_path
+
+
 def format_message(message, message2=''):
     message = str(message)
     if message2:
@@ -211,7 +234,7 @@ def json_dump_to_file(json_data, out_file, check=True, rollback_on_fail=True):
                 data = json.load(infile)
         except Exception as e:
             result['success'] = False
-            result['errors'].append("JSON file invalid")
+            result['errors'].append("JSON file invalid - {}".format(e))
 
     # If data save was unsuccessful and the rollback_on_fail param is flagged
     #   and there is a temp file set, roll back to old file

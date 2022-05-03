@@ -158,7 +158,11 @@ class LibraryScannerManager(threading.Thread):
         no_libraries_configured = True
         for lib_info in Library.get_all_libraries():
             no_libraries_configured = False
-            library = Library(lib_info['id'])
+            try:
+                library = Library(lib_info['id'])
+            except Exception as e:
+                self._log("Unable to fetch library config for ID {}".format(lib_info['id']), level='exception')
+                continue
             # Check if library scanner is enabled on any library
             if library.get_enable_scanner():
                 # Run library scan
@@ -181,10 +185,11 @@ class LibraryScannerManager(threading.Thread):
             valid = False
         return valid
 
-    def add_path_to_queue(self, pathname, library_id):
+    def add_path_to_queue(self, pathname, library_id, priority_score):
         self.scheduledtasks.put({
-            'pathname':   pathname,
-            'library_id': library_id,
+            'pathname':       pathname,
+            'library_id':     library_id,
+            'priority_score': priority_score,
         })
 
     def start_results_manager_thread(self, manager_id, status_updates, library_id):
@@ -281,12 +286,15 @@ class LibraryScannerManager(threading.Thread):
             # Check if all files have been tested
             if self.files_to_test.empty() and self.files_to_process.empty() and status_updates.empty():
                 percent_completed_string = '100%'
+                # Add a "double check" section.
+                # This is used to ensure that the loop does not prematurely exit when the last file tests still
+                # progressing that have not yet made it to the "files_to_process" queue.
                 double_check += 1
-                if double_check > 3:
+                if double_check > 5:
                     # There are not more files to test. Mark manager threads as completed
                     self.stop_all_file_test_managers()
                     break
-                time.sleep(.2)
+                time.sleep(1)
                 continue
 
             # Calculate percent of files tested
@@ -304,7 +312,8 @@ class LibraryScannerManager(threading.Thread):
                 current_file = status_updates.get()
                 continue
             elif not self.files_to_process.empty():
-                self.add_path_to_queue(self.files_to_process.get(), library_id)
+                item = self.files_to_process.get()
+                self.add_path_to_queue(item.get('path'), library_id, item.get('priority_score'))
                 continue
             else:
                 time.sleep(.1)

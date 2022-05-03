@@ -29,11 +29,11 @@
            OR OTHER DEALINGS IN THE SOFTWARE.
 
 """
-import os
 import random
 
 from unmanic.config import Config
-from unmanic.libs.unmodels import EnabledPlugins, Libraries, LibraryPluginFlow, Plugins, Tasks
+from unmanic.libs import common
+from unmanic.libs.unmodels import EnabledPlugins, Libraries, LibraryPluginFlow, Plugins, Tags, Tasks
 
 
 def generate_random_library_name():
@@ -92,7 +92,7 @@ class Library(object):
         from unmanic.config import Config
         default_library_path = Config().get_library_path()
         if not default_library_path:
-            default_library_path = os.path.join('/', 'library')
+            default_library_path = common.get_default_library_path()
 
         # Fetch all libraries from DB
         configured_libraries = Libraries.select()
@@ -104,6 +104,7 @@ class Library(object):
                 'id':     1,
                 'name':   generate_random_library_name(),
                 'path':   default_library_path,
+                'tags':   [],
                 'locked': False,
             }
             Libraries.create(**default_library)
@@ -116,12 +117,19 @@ class Library(object):
             if lib.id == 1 and lib.path != default_library_path:
                 lib.path = default_library_path
                 lib.save()
-            libraries.append({
+            # Create library config dictionary
+            library_config = {
                 'id':     lib.id,
                 'name':   lib.name,
                 'path':   lib.path,
+                'tags':   [],
                 'locked': lib.locked,
-            })
+            }
+            # Append tags
+            for tag in lib.tags.order_by(Tags.name):
+                library_config['tags'].append(tag.name)
+
+            libraries.append(library_config)
 
         # Return the list of libraries
         return libraries
@@ -233,6 +241,30 @@ class Library(object):
 
     def set_enable_inotify(self, value):
         self.model.enable_inotify = value
+
+    def get_priority_score(self):
+        return self.model.priority_score
+
+    def set_priority_score(self, value):
+        self.model.priority_score = value
+
+    def get_tags(self):
+        return_tags = []
+        for tag in self.model.tags.order_by(Tags.name):
+            return_tags.append(tag.name)
+        return return_tags
+
+    def set_tags(self, value):
+        # Create any missing tags
+        for tag_name in value:
+            # Do not update any current tags with on_conflict_replace() as this will also change their IDs
+            # Instead, just ignore them
+            Tags.insert(name=tag_name).on_conflict_ignore().execute()
+        # Create a SELECT query for all tags with the listed names
+        tags_select_query = Tags.select().where(Tags.name.in_(value))
+        # Clear out the current linking table of tags linked to this library
+        # Add new links for each tag that was fetched matching the provided names
+        self.model.tags.add(tags_select_query, clear_existing=True)
 
     def get_enabled_plugins(self, include_settings=False):
         """

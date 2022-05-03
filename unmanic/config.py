@@ -62,24 +62,36 @@ class Config(object, metaclass=SingletonType):
         # Configure debugging
         self.debugging = False
 
+        # Configure first run (future feature)
+        self.first_run = False
+
+        # Configure first run (future feature)
+        self.release_notes_viewed = None
+
         # Library Settings:
-        self.library_path = os.path.join('/', 'library')
+        self.library_path = common.get_default_library_path()
         self.enable_library_scanner = False
         self.schedule_full_scan_minutes = 1440
         self.follow_symlinks = True
         self.concurrent_file_testers = 2
         self.run_full_scan_on_start = False
         self.clear_pending_tasks_on_restart = True
+        self.auto_manage_completed_tasks = False
+        self.max_age_of_completed_tasks = 91
+        self.always_keep_failed_tasks = True
 
         # Worker settings
-        self.number_of_workers = 1
-        self.worker_event_schedules = []
-        self.cache_path = os.path.join('/', 'tmp', 'unmanic')
+        self.cache_path = common.get_default_cache_path()
 
         # Link settings
         self.installation_name = ''
         self.remote_installations = []
         self.distributed_worker_count_target = 0
+
+        # Legacy config
+        # TODO: Remove this before next major version bump
+        self.number_of_workers = None
+        self.worker_event_schedules = None
 
         # Import env variables and override all previous settings.
         self.__import_settings_from_env()
@@ -193,7 +205,7 @@ class Config(object, metaclass=SingletonType):
         result = common.json_dump_to_file(data, settings_file)
         if not result['success']:
             for message in result['errors']:
-                self._log("Exception:", message2=str(message), level="exception")
+                self._log("Error:", message2=str(message), level="error")
             raise Exception("Exception in writing settings to file")
 
     def get_config_item(self, key):
@@ -241,7 +253,10 @@ class Config(object, metaclass=SingletonType):
 
         # Save settings (if requested)
         if save_settings:
-            self.__write_settings_to_file()
+            try:
+                self.__write_settings_to_file()
+            except Exception as e:
+                self._log("Failed to write settings to file: ", message2=str(self.get_config_as_dict()), level="exception")
 
     def set_bulk_config_items(self, items, save_settings=True):
         """
@@ -300,6 +315,17 @@ class Config(object, metaclass=SingletonType):
         """
         return self.cache_path
 
+    def set_cache_path(self, cache_path):
+        """
+        Get setting - cache_path
+
+        :return:
+        """
+        if cache_path == "":
+            self._log("Cache path cannot be empty. Resetting it to default", level="warning")
+            cache_path = common.get_default_cache_path()
+        self.cache_path = cache_path
+
     def get_config_path(self):
         """
         Get setting - config_path
@@ -331,6 +357,22 @@ class Config(object, metaclass=SingletonType):
             unmanic_logging.disable_debugging()
         self.debugging = value
 
+    def get_first_run(self):
+        """
+        Get setting - first_run
+
+        :return:
+        """
+        return self.first_run
+
+    def get_release_notes_viewed(self):
+        """
+        Get setting - release_notes_viewed
+
+        :return:
+        """
+        return self.release_notes_viewed
+
     def get_library_path(self):
         """
         Get setting - library_path
@@ -346,6 +388,30 @@ class Config(object, metaclass=SingletonType):
         :return:
         """
         return self.clear_pending_tasks_on_restart
+
+    def get_auto_manage_completed_tasks(self):
+        """
+        Get setting - auto_manage_completed_tasks
+
+        :return:
+        """
+        return self.auto_manage_completed_tasks
+
+    def get_max_age_of_completed_tasks(self):
+        """
+        Get setting - max_age_of_completed_tasks
+
+        :return:
+        """
+        return self.max_age_of_completed_tasks
+
+    def get_always_keep_failed_tasks(self):
+        """
+        Get setting - always_keep_failed_tasks
+
+        :return:
+        """
+        return self.always_keep_failed_tasks
 
     def get_log_path(self):
         """

@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 
 """
-    unmanic.libraries.py
+    unmanic.workerschedules.py
 
     Written by:               Josh.5 <jsunnex@gmail.com>
-    Date:                     06 Feb 2022, (9:44 AM)
+    Date:                     18 Apr 2022, (4:19 PM)
 
     Copyright:
            Copyright (C) Josh Sunnex - All Rights Reserved
@@ -32,23 +32,17 @@
 
 from peewee import *
 
+from unmanic.libs.unmodels import WorkerGroups
 from unmanic.libs.unmodels.lib import BaseModel
-from unmanic.libs.unmodels.tags import Tags
 
 
-class Libraries(BaseModel):
+class WorkerSchedules(BaseModel):
     """
-    Libraries
+    WorkerSchedules
     """
-    name = TextField(null=False, unique=True)
-    path = TextField(null=False)
-    locked = BooleanField(null=False, default=False)
-    enable_scanner = BooleanField(null=False, default=False)
-    enable_inotify = BooleanField(null=False, default=False)
-    priority_score = BigIntegerField(null=False, default=0)
-    # ManyToMany Linking field. Does not create a column in the DB. See linking table below
-    tags = ManyToManyField(Tags, backref='tags')
-
-# Generate linking table for the 'tags' field above
-# https://docs.peewee-orm.com/en/latest/peewee/relationships.html#manytomanyfield
-LibraryTags = Libraries.tags.get_through_model()
+    repetition = TextField(null=False)
+    schedule_task = TextField(null=False)
+    schedule_time = TextField(null=False)
+    schedule_worker_count = IntegerField(null=True)
+    # Link to Worker Groups
+    worker_group_id = ForeignKeyField(WorkerGroups, backref='worker_schedules', on_delete='CASCADE', on_update='CASCADE')

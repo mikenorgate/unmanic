@@ -31,6 +31,7 @@
 """
 import os
 import time
+from datetime import date, datetime
 
 from unmanic.libs import common, history, task
 
@@ -47,11 +48,27 @@ def prepare_filtered_completed_tasks(params):
     length = params.get('length', 0)
 
     search_value = params.get('search_value', '')
+    status = params.get('status', 'all')
 
     order = params.get('order', {
         "column": 'finish_time',
         "dir":    'desc',
     })
+
+    # Define filters
+    task_success = None
+    if status == 'success':
+        task_success = True
+    elif status == 'failed':
+        task_success = False
+
+    after_time = None
+    if params.get('after'):
+        after_time = datetime.strptime(params.get('after'), '%Y-%m-%dT%H:%M:%S').timestamp()
+
+    before_time = None
+    if params.get('before'):
+        before_time = datetime.strptime(params.get('before'), '%Y-%m-%dT%H:%M:%S').timestamp()
 
     # Fetch historical tasks
     history_logging = history.History()
@@ -63,10 +80,15 @@ def prepare_filtered_completed_tasks(params):
     records_total_failed_count = history_logging.get_historic_task_list_filtered_and_sorted(task_success=False).count()
     # Get quantity after filters (without pagination)
     records_filtered_count = history_logging.get_historic_task_list_filtered_and_sorted(order=order, start=0, length=0,
-                                                                                        search_value=search_value).count()
+                                                                                        search_value=search_value,
+                                                                                        task_success=task_success,
+                                                                                        after_time=after_time,
+                                                                                        before_time=before_time).count()
     # Get filtered/sorted results
     task_results = history_logging.get_historic_task_list_filtered_and_sorted(order=order, start=start, length=length,
-                                                                              search_value=search_value)
+                                                                              search_value=search_value,
+                                                                              task_success=task_success, after_time=after_time,
+                                                                              before_time=before_time)
 
     # Build return data
     return_data = {

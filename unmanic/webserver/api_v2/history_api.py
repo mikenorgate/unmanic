@@ -130,6 +130,9 @@ class ApiHistoryHandler(BaseApiHandler):
                 'start':        json_request.get('start'),
                 'length':       json_request.get('length'),
                 'search_value': json_request.get('search_value'),
+                'status':       json_request.get('status'),
+                'after':        json_request.get('after'),
+                'before':       json_request.get('before'),
                 'order':        {
                     "column": json_request.get('order_by', 'finish_time'),
                     "dir":    json_request.get('order_direction', 'desc'),

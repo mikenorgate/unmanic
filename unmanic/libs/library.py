@@ -101,16 +101,20 @@ class Library(object):
         # If the libraries path is empty, then we should add the default path
         if not configured_libraries:
             default_library = {
-                'id':     1,
-                'name':   generate_random_library_name(),
-                'path':   default_library_path,
-                'tags':   [],
-                'locked': False,
+                'id':                 1,
+                'name':               generate_random_library_name(),
+                'path':               default_library_path,
+                'locked':             False,
+                "enable_remote_only": False,
+                "enable_scanner":     False,
+                "enable_inotify":     False,
+                'tags':               [],
             }
             Libraries.create(**default_library)
             return [default_library]
 
         # Loop over results
+        default_library = []
         libraries = []
         for lib in configured_libraries:
             # Always update the default library path
@@ -119,20 +123,27 @@ class Library(object):
                 lib.save()
             # Create library config dictionary
             library_config = {
-                'id':     lib.id,
-                'name':   lib.name,
-                'path':   lib.path,
-                'tags':   [],
-                'locked': lib.locked,
+                'id':                 lib.id,
+                'name':               lib.name,
+                'path':               lib.path,
+                'locked':             lib.locked,
+                'enable_remote_only': lib.enable_remote_only,
+                'enable_scanner':     lib.enable_scanner,
+                'enable_inotify':     lib.enable_inotify,
+                'tags':               [],
             }
             # Append tags
             for tag in lib.tags.order_by(Tags.name):
                 library_config['tags'].append(tag.name)
 
+            # Keep the default library separate
+            if lib.id == 1:
+                default_library.append(library_config)
+                continue
             libraries.append(library_config)
 
-        # Return the list of libraries
-        return libraries
+        # Return the list of libraries sorted by name
+        return default_library + sorted(libraries, key=lambda d: d['name'])
 
     @staticmethod
     def within_library_count_limits(frontend_messages=None):
@@ -179,6 +190,47 @@ class Library(object):
             del data['id']
         new_library = Libraries.create(**data)
         return Library(new_library.id)
+
+    @staticmethod
+    def export(library_id):
+        from unmanic.libs.plugins import PluginsHandler
+
+        # Read the library
+        library_config = Library(library_id)
+
+        # Get list of enabled plugins with their settings
+        enabled_plugins = []
+        for enabled_plugin in library_config.get_enabled_plugins(include_settings=True):
+            enabled_plugins.append({
+                'plugin_id':  enabled_plugin.get('plugin_id'),
+                'has_config': enabled_plugin.get('has_config'),
+                'settings':   enabled_plugin.get('settings'),
+            })
+
+        # Create plugin flow
+        plugin_flow = {}
+
+        plugin_handler = PluginsHandler()
+        for plugin_type in plugin_handler.get_plugin_types_with_flows():
+            plugin_flow[plugin_type] = []
+            flow = plugin_handler.get_enabled_plugin_flows_for_plugin_type(plugin_type, library_id)
+            for f in flow:
+                plugin_flow[plugin_type].append(f.get('plugin_id'))
+
+        return {
+            "plugins":        {
+                "enabled_plugins": enabled_plugins,
+                "plugin_flow":     plugin_flow,
+            },
+            "library_config": {
+                "name":               library_config.get_name(),
+                "path":               library_config.get_path(),
+                'enable_remote_only': library_config.get_enable_remote_only(),
+                'enable_scanner':     library_config.get_enable_scanner(),
+                'enable_inotify':     library_config.get_enable_inotify(),
+                'tags':               library_config.get_tags(),
+            },
+        }
 
     def __remove_enabled_plugins(self):
         """
@@ -229,6 +281,12 @@ class Library(object):
 
     def set_locked(self, value):
         self.model.locked = value
+
+    def get_enable_remote_only(self):
+        return self.model.enable_remote_only
+
+    def set_enable_remote_only(self, value):
+        self.model.enable_remote_only = value
 
     def get_enable_scanner(self):
         return self.model.enable_scanner
@@ -413,12 +471,14 @@ class Library(object):
         :return:
         """
         # Save changes made to model
-        self.model.save()
+        save_result = self.model.save()
 
         # If this is the default library path, save to config.library_path object also
         if self.get_id() == 1:
             config = Config()
             config.set_config_item('library_path', self.get_path())
+
+        return save_result
 
     def delete(self):
         """

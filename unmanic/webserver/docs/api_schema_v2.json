@@ -417,6 +417,84 @@
                     "command_log_lines"
                 ]
             },
+            "NotificationData": {
+                "type": "object",
+                "properties": {
+                    "uuid": {
+                        "type": "string",
+                        "description": "Unique ID for this notification",
+                        "example": "updateAvailable"
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "The type of notification",
+                        "example": "info"
+                    },
+                    "icon": {
+                        "type": "string",
+                        "description": "The icon to display with the notification",
+                        "example": "update"
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "The label of the notification. Can be a I18n key or a string",
+                        "example": "updateAvailableLabel"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "The message of the notification. Can be a I18n key or a string",
+                        "example": "updateAvailableMessage"
+                    },
+                    "navigation": {
+                        "type": "object",
+                        "description": "The navigation links of the notification",
+                        "example": {
+                            "url": "https://docs.unmanic.app"
+                        }
+                    }
+                },
+                "required": [
+                    "icon",
+                    "label",
+                    "message",
+                    "navigation",
+                    "type",
+                    "uuid"
+                ]
+            },
+            "RequestNotificationsData": {
+                "type": "object",
+                "properties": {
+                    "notifications": {
+                        "minItems": 0,
+                        "description": "List of notifications",
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/NotificationData"
+                        }
+                    }
+                },
+                "required": [
+                    "notifications"
+                ]
+            },
+            "RequestTableUpdateByUuidList": {
+                "type": "object",
+                "properties": {
+                    "uuid_list": {
+                        "type": "array",
+                        "minItems": 1,
+                        "description": "List of table UUIDs",
+                        "example": [],
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": [
+                    "uuid_list"
+                ]
+            },
             "RequestPendingTableData": {
                 "type": "object",
                 "properties": {
@@ -597,6 +675,11 @@
                         "type": "string",
                         "description": "The name of the library to append this task to",
                         "example": "Default"
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "The type of pending task to create (local/remote)",
+                        "example": "local"
                     },
                     "priority_score": {
                         "type": "integer",
@@ -870,6 +953,18 @@
                         "description": "The label used to define this config input",
                         "example": "Downmix DTS-HD Master Audio (max 5.1 channels)?"
                     },
+                    "description": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "Description of input field",
+                        "example": "Will automatically downmix DTS-HD Master Audio to 5.1 channels "
+                    },
+                    "tooltip": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "Description of input field",
+                        "example": "Will automatically downmix DTS-HD Master Audio to 5.1 channels "
+                    },
                     "select_options": {
                         "type": "array",
                         "description": "Additional options if the input_type is set to 'select'",
@@ -900,9 +995,15 @@
                         "type": "string",
                         "description": "Should the setting input be displayed (visible, hidden)",
                         "example": "visible"
+                    },
+                    "sub_setting": {
+                        "type": "boolean",
+                        "description": "Should the setting be a nested sub-setting field",
+                        "example": false
                     }
                 },
                 "required": [
+                    "description",
                     "display",
                     "input_type",
                     "key",
@@ -910,6 +1011,8 @@
                     "label",
                     "select_options",
                     "slider_options",
+                    "sub_setting",
+                    "tooltip",
                     "value"
                 ]
             },
@@ -1601,7 +1704,10 @@
                             "enable_receiving_tasks": false,
                             "enable_sending_tasks": false,
                             "enable_task_preloading": true,
-                            "enable_distributed_worker_count": false
+                            "enable_distributed_worker_count": false,
+                            "preloading_count": 2,
+                            "enable_checksum_validation": false,
+                            "enable_config_missing_libraries": false
                         }
                     },
                     "distributed_worker_count_target": {
@@ -1637,6 +1743,21 @@
                         "description": "If the library is locked and cannot be deleted",
                         "example": false
                     },
+                    "enable_remote_only": {
+                        "type": "boolean",
+                        "description": "If the library is configured for remote files only",
+                        "example": false
+                    },
+                    "enable_scanner": {
+                        "type": "boolean",
+                        "description": "If the library is configured to execute library scans",
+                        "example": false
+                    },
+                    "enable_inotify": {
+                        "type": "boolean",
+                        "description": "If the library is configured to monitor for file changes",
+                        "example": false
+                    },
                     "tags": {
                         "type": "array",
                         "description": "A list of tags associated with this library",
@@ -1650,6 +1771,9 @@
                     }
                 },
                 "required": [
+                    "enable_inotify",
+                    "enable_remote_only",
+                    "enable_scanner",
                     "id",
                     "locked",
                     "name",
@@ -2395,6 +2519,131 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/CompletedTasksLog"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/notifications/read": {
+            "get": {
+                "description": "Returns a list of notifications in reverse chronological order.",
+                "responses": {
+                    "200": {
+                        "description": "Sample response: A list of notifications in reverse chronological order.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RequestNotificationsData"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/notifications/remove": {
+            "delete": {
+                "description": "Delete one or all notifications.",
+                "requestBody": {
+                    "description": "Requested list of items to delete.",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RequestTableUpdateByUuidList"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful request; Returns success status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BaseSuccess"
                                 }
                             }
                         }
@@ -4949,6 +5198,74 @@
                 }
             }
         },
+        "/settings/link/remove": {
+            "delete": {
+                "description": "Remove a configuration for a remote installation link",
+                "requestBody": {
+                    "description": "Requested a remote installation link to remove.",
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RequestRemoteInstallationLinkConfig"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful request; Returns success status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BaseSuccess"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/settings/libraries": {
             "get": {
                 "description": "Returns a list of all libraries.",
@@ -5348,9 +5665,9 @@
         },
         "/upload/pending/file": {
             "post": {
-                "description": "Returns a list of pending tasks.",
+                "description": "Uploads a file to the pending tasks list",
                 "requestBody": {
-                    "description": "Returns a list of pending tasks.",
+                    "description": "Uploads a file to the pending tasks list",
                     "required": true,
                     "content": {
                         "multipart/form-data": {
@@ -5373,6 +5690,80 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/PendingTasksTableResults"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request; Check `messages` for any validation errors",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadRequest"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Bad request; Requested endpoint not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadEndpoint"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Bad request; Requested method is not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BadMethod"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error; Check `error` for exception",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InternalError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/upload/plugin/file": {
+            "post": {
+                "description": "Uploads a plugin ZIP file and installs it",
+                "requestBody": {
+                    "description": "Uploads a plugin ZIP file and installs it",
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "fileName": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful request; Returns success status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BaseSuccess"
                                 }
                             }
                         }

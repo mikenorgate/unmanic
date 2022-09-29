@@ -174,6 +174,18 @@ class RequestTableUpdateByIdList(BaseSchema):
     )
 
 
+class RequestTableUpdateByUuidList(BaseSchema):
+    """Schema for updating tables by UUID"""
+
+    uuid_list = fields.List(
+        cls_or_instance=fields.Str,
+        required=True,
+        description="List of table UUIDs",
+        example=[],
+        validate=validate.Length(min=1),
+    )
+
+
 class TableRecordsSuccessSchema(BaseSchema):
     """Schema for table results"""
 
@@ -381,6 +393,56 @@ class RequestAddCompletedToPendingTasksSchema(RequestTableUpdateByIdList):
     )
 
 
+# NOTIFICATIONS
+# =============
+
+class NotificationDataSchema(BaseSchema):
+    """Schema for notification data"""
+
+    uuid = fields.Str(
+        required=True,
+        description="Unique ID for this notification",
+        example="updateAvailable",
+    )
+    type = fields.Str(
+        required=True,
+        description="The type of notification",
+        example="info",
+    )
+    icon = fields.Str(
+        required=True,
+        description="The icon to display with the notification",
+        example="update",
+    )
+    label = fields.Str(
+        required=True,
+        description="The label of the notification. Can be a I18n key or a string",
+        example="updateAvailableLabel",
+    )
+    message = fields.Str(
+        required=True,
+        description="The message of the notification. Can be a I18n key or a string",
+        example="updateAvailableMessage",
+    )
+    navigation = fields.Dict(
+        required=True,
+        description="The navigation links of the notification",
+        example={'url': "https://docs.unmanic.app"},
+    )
+
+
+class RequestNotificationsDataSchema(BaseSchema):
+    """Schema for returning the current list of notifications"""
+
+    notifications = fields.Nested(
+        NotificationDataSchema,
+        required=True,
+        description="List of notifications",
+        many=True,
+        validate=validate.Length(min=0),
+    )
+
+
 # PENDING
 # =======
 
@@ -478,6 +540,11 @@ class RequestPendingTaskCreateSchema(BaseSchema):
         required=False,
         description="The name of the library to append this task to",
         example='Default',
+    )
+    type = fields.Str(
+        required=False,
+        description="The type of pending task to create (local/remote)",
+        example='local',
     )
     priority_score = fields.Int(
         required=False,
@@ -664,6 +731,18 @@ class PluginsConfigInputItemSchema(BaseSchema):
         description="The label used to define this config input",
         example="Downmix DTS-HD Master Audio (max 5.1 channels)?",
     )
+    description = fields.Str(
+        required=True,
+        description="Description of input field",
+        example="Will automatically downmix DTS-HD Master Audio to 5.1 channels ",
+        allow_none=True,
+    )
+    tooltip = fields.Str(
+        required=True,
+        description="Description of input field",
+        example="Will automatically downmix DTS-HD Master Audio to 5.1 channels ",
+        allow_none=True,
+    )
     select_options = fields.List(
         cls_or_instance=fields.Dict,
         required=True,
@@ -692,6 +771,11 @@ class PluginsConfigInputItemSchema(BaseSchema):
         required=True,
         description="Should the setting input be displayed (visible, hidden)",
         example="visible",
+    )
+    sub_setting = fields.Boolean(
+        required=True,
+        description="Should the setting be a nested sub-setting field",
+        example=False,
     )
 
 
@@ -1147,6 +1231,9 @@ class SettingsRemoteInstallationLinkConfigSchema(BaseSchema):
             "enable_sending_tasks":            False,
             "enable_task_preloading":          True,
             "enable_distributed_worker_count": False,
+            "preloading_count":                2,
+            "enable_checksum_validation":      False,
+            "enable_config_missing_libraries": False,
         },
     )
     distributed_worker_count_target = fields.Int(
@@ -1177,6 +1264,21 @@ class LibraryResultsSchema(BaseSchema):
     locked = fields.Boolean(
         required=True,
         description="If the library is locked and cannot be deleted",
+        example=False,
+    )
+    enable_remote_only = fields.Boolean(
+        required=True,
+        description="If the library is configured for remote files only",
+        example=False,
+    )
+    enable_scanner = fields.Boolean(
+        required=True,
+        description="If the library is configured to execute library scans",
+        example=False,
+    )
+    enable_inotify = fields.Boolean(
+        required=True,
+        description="If the library is configured to monitor for file changes",
         example=False,
     )
     tags = fields.List(

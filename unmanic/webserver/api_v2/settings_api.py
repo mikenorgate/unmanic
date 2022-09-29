@@ -105,6 +105,11 @@ class ApiSettingsHandler(BaseApiHandler):
             "call_method":       "write_link_config",
         },
         {
+            "path_pattern":      r"/settings/link/remove",
+            "supported_methods": ["DELETE"],
+            "call_method":       "remove_link_config",
+        },
+        {
             "path_pattern":      r"/settings/libraries",
             "supported_methods": ["GET"],
             "call_method":       "get_all_libraries",
@@ -242,6 +247,17 @@ class ApiSettingsHandler(BaseApiHandler):
         """
         try:
             json_request = self.read_json_request(SettingsReadAndWriteSchema())
+
+            # Get settings dict from request
+            settings_dict = json_request.get('settings', {})
+
+            # Remove config items that should not be saved through this API endpoint
+            remove_settings = [
+                'remote_installations'
+            ]
+            for remove_setting in remove_settings:
+                if settings_dict.get(remove_setting):
+                    del settings_dict[remove_setting]
 
             # Save settings - writing to file.
             # Throws exception if settings fail to save
@@ -558,11 +574,8 @@ class ApiSettingsHandler(BaseApiHandler):
             json_request = self.read_json_request(SettingsWorkerGroupConfigSchema())
 
             # Write config for this worker group
-            if not json_request.get('id'):
-                WorkerGroup.create(json_request)
-            else:
-                from unmanic.webserver.helpers import settings
-                settings.save_worker_group_config(json_request)
+            from unmanic.webserver.helpers import settings
+            settings.save_worker_group_config(json_request)
 
             self.write_success()
             return
@@ -705,6 +718,9 @@ class ApiSettingsHandler(BaseApiHandler):
                         "enable_receiving_tasks":          data.get('enable_receiving_tasks'),
                         "enable_sending_tasks":            data.get('enable_sending_tasks'),
                         "enable_task_preloading":          data.get('enable_task_preloading'),
+                        "preloading_count":                data.get('preloading_count'),
+                        "enable_checksum_validation":      data.get('enable_checksum_validation'),
+                        "enable_config_missing_libraries": data.get('enable_config_missing_libraries'),
                         "enable_distributed_worker_count": data.get('enable_distributed_worker_count', False),
                     },
                     "distributed_worker_count_target": data.get('distributed_worker_count_target', 0),
@@ -770,6 +786,69 @@ class ApiSettingsHandler(BaseApiHandler):
             links = Links()
             links.update_single_remote_installation_link_config(json_request.get('link_config'),
                                                                 json_request.get('distributed_worker_count_target', 0))
+
+            self.write_success()
+            return
+        except BaseApiError as bae:
+            tornado.log.app_log.error("BaseApiError.{}: {}".format(self.route.get('call_method'), str(bae)))
+            return
+        except Exception as e:
+            self.set_status(self.STATUS_ERROR_INTERNAL, reason=str(e))
+            self.write_error()
+
+    def remove_link_config(self):
+        """
+        Settings - remove a configuration for a remote installation link
+        ---
+        description: Remove a configuration for a remote installation link
+        requestBody:
+            description: Requested a remote installation link to remove.
+            required: True
+            content:
+                application/json:
+                    schema:
+                        RequestRemoteInstallationLinkConfigSchema
+        responses:
+            200:
+                description: 'Successful request; Returns success status'
+                content:
+                    application/json:
+                        schema:
+                            BaseSuccessSchema
+            400:
+                description: Bad request; Check `messages` for any validation errors
+                content:
+                    application/json:
+                        schema:
+                            BadRequestSchema
+            404:
+                description: Bad request; Requested endpoint not found
+                content:
+                    application/json:
+                        schema:
+                            BadEndpointSchema
+            405:
+                description: Bad request; Requested method is not allowed
+                content:
+                    application/json:
+                        schema:
+                            BadMethodSchema
+            500:
+                description: Internal error; Check `error` for exception
+                content:
+                    application/json:
+                        schema:
+                            InternalErrorSchema
+        """
+        try:
+            json_request = self.read_json_request(RequestRemoteInstallationLinkConfigSchema())
+
+            # Delete the remote installation using the given uuid
+            links = Links()
+            if not links.delete_remote_installation_link_config(json_request.get('uuid')):
+                self.set_status(self.STATUS_ERROR_INTERNAL, reason="Failed to remove link by its uuid")
+                self.write_error()
+                return
 
             self.write_success()
             return
@@ -883,12 +962,13 @@ class ApiSettingsHandler(BaseApiHandler):
 
             library_settings = {
                 "library_config": {
-                    "id":             0,
-                    "name":           '',
-                    "path":           '/',
-                    "enable_scanner": False,
-                    "enable_inotify": False,
-                    "priority_score": 0,
+                    "id":                 0,
+                    "name":               '',
+                    "path":               '/',
+                    "enable_remote_only": False,
+                    "enable_scanner":     False,
+                    "enable_inotify":     False,
+                    "priority_score":     0,
                 },
                 "plugins":        {
                     "enabled_plugins": [],
@@ -899,14 +979,15 @@ class ApiSettingsHandler(BaseApiHandler):
                 library_config = Library(json_request.get('id'))
                 library_settings = {
                     "library_config": {
-                        "id":             library_config.get_id(),
-                        "name":           library_config.get_name(),
-                        "path":           library_config.get_path(),
-                        "locked":         library_config.get_locked(),
-                        "enable_scanner": library_config.get_enable_scanner(),
-                        "enable_inotify": library_config.get_enable_inotify(),
-                        "priority_score": library_config.get_priority_score(),
-                        "tags":           library_config.get_tags(),
+                        "id":                 library_config.get_id(),
+                        "name":               library_config.get_name(),
+                        "path":               library_config.get_path(),
+                        "locked":             library_config.get_locked(),
+                        "enable_remote_only": library_config.get_enable_remote_only(),
+                        "enable_scanner":     library_config.get_enable_scanner(),
+                        "enable_inotify":     library_config.get_enable_inotify(),
+                        "priority_score":     library_config.get_priority_score(),
+                        "tags":               library_config.get_tags(),
                     },
                     "plugins":        {
                         "enabled_plugins": library_config.get_enabled_plugins(),
@@ -979,7 +1060,10 @@ class ApiSettingsHandler(BaseApiHandler):
             library_config = json_request['library_config']
             plugin_config = json_request.get('plugins', {})
             library_id = library_config.get('id', 0)
-            settings.save_library_config(library_id, library_config=library_config, plugin_config=plugin_config)
+            if not settings.save_library_config(library_id, library_config=library_config, plugin_config=plugin_config):
+                self.set_status(self.STATUS_ERROR_INTERNAL, reason="Failed to write library config")
+                self.write_error()
+                return
 
             self.write_success()
             return
@@ -1102,41 +1186,12 @@ class ApiSettingsHandler(BaseApiHandler):
         try:
             json_request = self.read_json_request(RequestLibraryByIdSchema())
 
-            # Read the library
-            library_config = Library(json_request.get('id'))
-
-            # Get list of enabled plugins with their settings
-            enabled_plugins = []
-            for enabled_plugin in library_config.get_enabled_plugins(include_settings=True):
-                enabled_plugins.append({
-                    'plugin_id': enabled_plugin.get('plugin_id'),
-                    'settings':  enabled_plugin.get('settings'),
-                })
-
-            # Create plugin flow
-            plugin_flow = {}
-            for plugin_type in plugins.get_plugin_types_with_flows():
-                plugin_flow[plugin_type] = []
-                flow = plugins.get_enabled_plugin_flows_for_plugin_type(plugin_type, json_request.get('id'))
-                for f in flow:
-                    plugin_flow[plugin_type].append(f.get('plugin_id'))
-
-            plugin_settings = {
-                "plugins":        {
-                    "enabled_plugins": enabled_plugins,
-                    "plugin_flow":     plugin_flow,
-                },
-                "library_config": {
-                    "name":           library_config.get_name(),
-                    "path":           library_config.get_path(),
-                    "enable_scanner": library_config.get_enable_scanner(),
-                    "enable_inotify": library_config.get_enable_inotify(),
-                },
-            }
+            # Fetch library config
+            library_config = Library.export(json_request.get('id'))
 
             response = self.build_response(
                 SettingsLibraryPluginConfigExportSchema(),
-                plugin_settings
+                library_config
             )
 
             self.write_success(response)
@@ -1200,7 +1255,10 @@ class ApiSettingsHandler(BaseApiHandler):
             library_config = json_request.get('library_config')
             plugin_config = json_request.get('plugins', {})
             library_id = json_request.get('library_id')
-            settings.save_library_config(library_id, library_config=library_config, plugin_config=plugin_config)
+            if not settings.save_library_config(library_id, library_config=library_config, plugin_config=plugin_config):
+                self.set_status(self.STATUS_ERROR_INTERNAL, reason="Failed to import library config")
+                self.write_error()
+                return
 
             self.write_success()
             return

@@ -37,6 +37,7 @@ import time
 from unmanic import config
 from unmanic.libs import common, history
 from unmanic.libs.library import Library
+from unmanic.libs.notifications import Notifications
 from unmanic.libs.plugins import PluginsHandler
 
 """
@@ -262,6 +263,7 @@ class PostProcessor(threading.Thread):
 
         for plugin_module in plugin_modules:
             data = {
+                'final_cache_path':            cache_path,
                 'library_id':                  library_id,
                 'source_data':                 source_data,
                 'task_processing_success':     self.current_task.task.success,
@@ -345,7 +347,6 @@ class PostProcessor(threading.Thread):
                 self._log("The file_in path does not exist! '{}'".format(file_in), level="warning")
                 time.sleep(1)
             self._log("Fetching checksum of source file '{}'.".format(file_in), level='debug')
-            before_checksum = common.get_file_checksum(file_in)
 
             # Use a '.part' suffix for the file movement, then rename it after
             part_file_out = os.path.join("{}.unmanic.part".format(file_out))
@@ -359,19 +360,6 @@ class PostProcessor(threading.Thread):
             else:
                 self._log("Copying file '{}' --> '{}'.".format(file_in, part_file_out), level='debug')
                 shutil.copyfile(file_in, part_file_out)
-
-            # Get a checksum post file movement
-            self._log("Fetching checksum of destination file '{}'.".format(part_file_out), level='debug')
-            after_checksum = common.get_file_checksum(part_file_out)
-
-            # Compare the checksums on the copied file to ensure it is still correct
-            self._log("Comparing checksum of destination file with source file.", level='debug')
-            if before_checksum != after_checksum:
-                # Something went wrong during that file copy
-                self._log("Checksum mismatch during postprocessor file movement '{}' on file '{}'".format(plugin_id, file_in),
-                          level='warning')
-                return False
-            self._log("Checksum matched.", level='debug')
 
             # Remove dest file if it already exists (required only for moves)
             if os.path.exists(file_out):
@@ -402,6 +390,24 @@ class PostProcessor(threading.Thread):
         history_logging = history.History()
         task_dump = self.current_task.task_dump()
 
+        # If task fails, the add a notification that a task has failed
+        if not self.current_task.task.success:
+            notifications = Notifications()
+            notifications.add(
+                {
+                    'uuid':       'newFailedTask',
+                    'type':       'error',
+                    'icon':       'report',
+                    'label':      'failedTaskLabel',
+                    'message':    'You have a new failed task in your completed tasks list',
+                    'navigation': {
+                        'push':   '/ui/dashboard',
+                        'events': [
+                            'completedTasksShowFailed',
+                        ],
+                    },
+                })
+
         history_logging.save_task_history(
             {
                 'task_label':          task_dump.get('task_label', ''),
@@ -419,11 +425,6 @@ class PostProcessor(threading.Thread):
         task_dump = self.current_task.task_dump()
         destination_data = self.current_task.get_destination_data()
 
-        # Generate checksum
-        checksum = 'UNKNOWN'
-        if os.path.exists(task_dump.get('abspath')):
-            checksum = common.get_file_checksum(task_dump.get('abspath'))
-
         # Dump history log as metadata in the file's path
         tasks_data_file = os.path.join(os.path.dirname(destination_data.get('abspath')), 'data.json')
         result = common.json_dump_to_file(
@@ -435,7 +436,7 @@ class PostProcessor(threading.Thread):
                 'finish_time':         task_dump.get('finish_time', ''),
                 'processed_by_worker': task_dump.get('processed_by_worker', ''),
                 'log':                 task_dump.get('log', ''),
-                'checksum':            checksum,
+                'checksum':            'UNKNOWN',
             }
             , tasks_data_file)
         if not result['success']:

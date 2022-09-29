@@ -267,13 +267,14 @@ def check_if_task_exists_matching_path(abspath):
     return False
 
 
-def create_task(abspath, library_id=1, library_name=None, priority_score=0):
+def create_task(abspath, library_id=1, library_name=None, task_type='local', priority_score=0):
     """
     Create a pending task given the path to a file and a library ID or name
 
     :param abspath:
     :param library_id:
     :param library_name:
+    :param task_type:
     :param priority_score:
     :return:
     """
@@ -289,15 +290,11 @@ def create_task(abspath, library_id=1, library_name=None, priority_score=0):
     new_task = task.Task()
 
     # Create the task as a local task as the path provided is local
-    if not new_task.create_task_by_absolute_path(abspath, task_type='local', library_id=library.get_id(),
+    if not new_task.create_task_by_absolute_path(abspath, task_type=task_type, library_id=library.get_id(),
                                                  priority_score=priority_score):
         # File was not created.
         # Do not carry on.
         return False
-
-    # Create checksum for response
-    from unmanic.libs import common
-    checksum = common.get_file_checksum(abspath)
 
     # Return task info (same as the data returned in a file upload
     task_info = new_task.get_task_data()
@@ -308,5 +305,4 @@ def create_task(abspath, library_id=1, library_name=None, priority_score=0):
         "type":       task_info.get('type'),
         "status":     task_info.get('status'),
         "library_id": task_info.get('library_id'),
-        "checksum":   checksum,
     }

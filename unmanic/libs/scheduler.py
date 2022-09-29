@@ -74,8 +74,8 @@ class ScheduledTasksManager(threading.Thread):
         # Create scheduled tasks
         # Check the session every 60 minutes
         self.scheduler.every(60).minutes.do(self.register_unmanic)
-        # Run the plugin repo update every 60 minutes
-        self.scheduler.every(60).minutes.do(self.plugin_repo_update)
+        # Run the plugin repo update every 3 hours
+        self.scheduler.every(3).hours.do(self.plugin_repo_update)
         # Run the remote installation link update every 10 seconds
         self.scheduler.every(10).seconds.do(self.update_remote_installation_links)
         # Run the remote installation distributed worker counter sync every minute
@@ -86,7 +86,7 @@ class ScheduledTasksManager(threading.Thread):
 
         # Loop every 2 seconds to check if a task is due to be run
         while not self.abort_flag.is_set():
-            time.sleep(2)
+            time.sleep(1)
             # Check if scheduled task is due
             self.scheduler.run_pending()
 

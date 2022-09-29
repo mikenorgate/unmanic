@@ -111,14 +111,7 @@ def get_plugin_types_with_flows():
 
     :return:
     """
-    return_plugin_types = []
-    plugin_ex = PluginExecutor()
-    types_list = plugin_ex.get_all_plugin_types()
-    # Filter out the types without flows
-    for plugin_type in types_list:
-        if plugin_type.get('has_flow'):
-            return_plugin_types.append(plugin_type.get('id'))
-    return return_plugin_types
+    return PluginsHandler.get_plugin_types_with_flows()
 
 
 def get_enabled_plugin_flows_for_plugin_type(plugin_type, library_id):
@@ -130,23 +123,7 @@ def get_enabled_plugin_flows_for_plugin_type(plugin_type, library_id):
     :return:
     """
     plugin_handler = PluginsHandler()
-    plugin_modules = plugin_handler.get_enabled_plugin_modules_by_type(plugin_type, library_id=library_id)
-
-    # Only return the data that we need
-    return_plugin_flow = []
-    for plugin_module in plugin_modules:
-        return_plugin_flow.append(
-            {
-                "plugin_id":   plugin_module.get("plugin_id"),
-                "name":        plugin_module.get("name", ""),
-                "author":      plugin_module.get("author", ""),
-                "description": plugin_module.get("description", ""),
-                "version":     plugin_module.get("version", ""),
-                "icon":        plugin_module.get("icon", ""),
-            }
-        )
-
-    return return_plugin_flow
+    return plugin_handler.get_enabled_plugin_flows_for_plugin_type(plugin_type, library_id)
 
 
 def get_enabled_plugin_data_panels():
@@ -249,9 +226,12 @@ def get_plugin_settings(plugin_id: str, library_id=None):
                 "value":          plugin_settings.get(key),
                 "input_type":     None,
                 "label":          None,
+                "description":    None,
+                "tooltip":        None,
                 "select_options": [],
                 "slider_options": {},
                 "display":        "visible",
+                "sub_setting":    False,
             }
 
             plugin_setting_meta = plugin_settings_meta.get(key, {})
@@ -277,11 +257,18 @@ def get_plugin_settings(plugin_id: str, library_id=None):
 
             # Set input display options
             form_input['display'] = plugin_setting_meta.get('display', 'visible')
+            form_input['sub_setting'] = plugin_setting_meta.get('sub_setting', False)
 
             # Set input label text
             form_input['label'] = plugin_setting_meta.get('label', None)
             if not form_input['label']:
                 form_input['label'] = key
+
+            # Set input description text
+            form_input['description'] = plugin_setting_meta.get('description', '')
+
+            # Set input tooltip text
+            form_input['tooltip'] = plugin_setting_meta.get('tooltip', '')
 
             # Set options if form input is select
             if form_input['input_type'] == 'select':

@@ -88,24 +88,6 @@ class FileTest(object):
         # No results were found matching that pathname
         return False
 
-    def file_success_in_history(self, path):
-        """
-        Check if file has already succeeded in history
-
-        :return:
-        """
-        # Fetch historical tasks
-        history_logging = history.History()
-        success_paths = []
-        success_tasks = history_logging.get_historic_tasks_list_with_source_probe(task_success=True)
-        for task in success_tasks:
-            success_paths.append(task.get('abspath'))
-        if path in success_paths:
-            # That pathname was found in the results of failed historic tasks
-            return True
-        # No results were found matching that pathname
-        return False
-
     def file_in_unmanic_ignore_lockfile(self, path):
         """
         Check if folder contains a '.unmanicignore' lockfile
@@ -134,14 +116,6 @@ class FileTest(object):
         """
         return_value = None
         file_issues = []
-
-        # Check if file has succeeded in history.
-        if self.file_success_in_history(path):
-            file_issues.append({
-                'id':      'blacklisted',
-                'message': "File already completed - '{}'".format(path),
-            })
-            return False, file_issues        
 
         # TODO: Remove this
         if self.file_in_unmanic_ignore_lockfile(path):
